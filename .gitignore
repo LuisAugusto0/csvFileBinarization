@@ -1,4 +1,4 @@
-.csv
-.CSV
-.txt
+*.csv
+*.CSV
+*.txt
 input
