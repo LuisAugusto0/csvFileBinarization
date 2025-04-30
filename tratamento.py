@@ -41,7 +41,7 @@ def arrayStringTest(array, value):
             return True
     return False
     
-def binarizeNumericColumn(df, column_names, new_column_name, threshold, threshold_type):
+def binarizeColumn(df, column_names, new_column_name, threshold, threshold_type):
     """
     Binarizes one or multiple columns in the DataFrame based on a threshold.
     
@@ -174,19 +174,20 @@ def readColumnsToDrop(df):
     def display_menu():
         """Helper function to display menu options"""
         interactive_print("\n=== Column Removal Options ===")
-        interactive_print("- Enter a single index (e.g. '5') to mark a column for removal")
-        interactive_print("- Enter a range (e.g. '5-10') to mark multiple columns for removal")
+        interactive_print("- Enter a single index or column name (e.g. '5') to mark a column for removal")
+        interactive_print("- Enter a index or column name range (e.g. '5-10') to mark multiple columns for removal")
         interactive_print("- Enter 'u' to access the undo menu")
         interactive_print("- Enter 'l' to list all columns again")
-        interactive_print("- Enter 'r' to display only columns marked for removal")
-        interactive_print("- Enter 'h' to this menu again")
+        interactive_print("- Enter 'r' to display  only columns marked for removal")
+        interactive_print("- Enter 'h' to this menumenumenumenumenumenu again")
         interactive_print("- Enter 'done' to finish selection")
     
     display_columns(df_columns, columns_to_drop)
     display_menu()
     
     while True:
-        user_input = input("\nEnter command: ").strip().lower()
+        interactive_print("\nEnter commnd")
+        user_input = input().strip().lower()
         
         if user_input == 'done':
             break
@@ -216,7 +217,8 @@ def readColumnsToDrop(df):
             for i, (col, reason) in enumerate(removed_columns_history):
                 interactive_print(f"{i}. {col} - {reason}")
             
-            undo_input = input("Enter index to restore (or 'back' to return): ")
+            interactive_print("Enter index to restore (or 'back' to return): ")
+            undo_input = input()
             if undo_input.lower() == 'back':
                 continue
                 
@@ -242,6 +244,10 @@ def readColumnsToDrop(df):
             # Parse range input
             if '-' in user_input:
                 start, end = map(int, user_input.split('-'))
+                if (isinstance(start, str)) and (not start.isdigit()):
+                    start = df_columns.index(start)
+                if (isinstance(end, str)) and (not end.isdigit()):
+                    end = df_columns.index(end)
                 # Ensure valid range
                 if 0 <= start <= end < len(df_columns):
                     # Add columns to drop list with reason
@@ -255,6 +261,8 @@ def readColumnsToDrop(df):
                     interactive_print("Invalid range! Please enter valid column indices.")
             else:
                 # Single column case
+                if  (isinstance(undo_input, str)) and (not user_input.isdigit()):
+                    user_input = df_columns.index(user_input)
                 index = int(user_input)
                 if 0 <= index < len(df_columns):
                     col = df_columns[index]
@@ -329,8 +337,8 @@ def binarizeColumnsMenu(df):
     def display_menu():
         """Helper function to display menu options"""
         interactive_print("\n=== Column Binarization Options ===")
-        interactive_print("- Enter 'bo' to binarize olny one column")
-        interactive_print("- Enter 'bm' to binarize multiple columns")
+        interactive_print("- Enter an index or name to binarize olny one column")
+        interactive_print("- Enter the index or names separated by comma to binarize multiple columns")
         interactive_print("- Enter 'r' to remove a binarized column")
         interactive_print("- Enter 'l' to list all columns")
         interactive_print("- Enter 'h' to show this help menu")
@@ -368,7 +376,8 @@ def binarizeColumnsMenu(df):
     display_menu()
     
     while True:
-        user_input = input("\nEnter command: ").strip().lower()
+        interactive_print("\nEnter commnd: ")
+        user_input = input().strip().lower()
         
         if user_input == 'done':
             break
@@ -409,7 +418,8 @@ def binarizeColumnsMenu(df):
                     interactive_print(f"[{i}] {new_col} (from {src_display})")
             
             try:
-                remove_idx = int(input("Enter index of column to remove (or -1 to cancel): "))
+                interactive_print("Enter index of column to remove (or -1 to cancel): ")
+                remove_idx = int(input())
                 if remove_idx == -1:
                     continue
                     
@@ -427,6 +437,21 @@ def binarizeColumnsMenu(df):
                 interactive_print("Please enter a valid number")
             
             continue
+        # else
+        #     # Single or multiple column binarization
+        #     current_columns = list(df_result.columns) 
+        #     # Parse each item (could be index or name)
+        #     items = [item.strip() for item in col_input.split(',')]
+        #     # Parse range input
+        #     if '-' in user_input:
+        #         start, end = map(int, user_input.split(','))
+        #         f
+        #         if (isinstance(start, str)) and (not start.isdigit()):
+        #             start = df_columns.index(start)
+        #         if (isinstance(end, str)) and (not end.isdigit()):
+        #             end = df_columns.index(end)
+        #         # Ensure valid range
+        #         if 0 <= start <= end < len(df_columns):
         elif user_input == 'bo' or user_input == 'bm':
             # Single or multiple column binarization
             current_columns = list(df_result.columns)
@@ -459,7 +484,8 @@ def binarizeColumnsMenu(df):
                     continue
             
             # Get new column name
-            new_column_name = input("Enter name for the new binarized column: ").strip()
+            interactive_print("Enter name for the new binarized column: ")
+            new_column_name = input().strip()
             if not new_column_name:
                 interactive_print("Column name cannot be empty!")
                 continue
@@ -478,15 +504,16 @@ def binarizeColumnsMenu(df):
             drop_originals = False
             
             if not skip_drop_question:
-                drop_originals = input("Drop original columns after binarization? (y/n): ").strip().lower()
+                interactive_print("Drop original columns after binarization? (y/n): ")
+                drop_originals = input().strip().lower()
                 drop_originals = drop_originals == 'y'
             else:
                 interactive_print("Note: Source column will be replaced with binarized version")
             
             # Get threshold type
-            interactive_print("\nSelect threshold type:")
             display_threshold_types()
-            threshold_type = input("Enter threshold type: ").strip().lower()
+            interactive_print("Enter threshold type: ")
+            threshold_type = input().strip().lower()
             
             valid_types = ['superior', 'inferior', 'superior_inferior', 
                            'equals', 'not_equals', 'string_equals', 'string_not_equals']
@@ -497,16 +524,20 @@ def binarizeColumnsMenu(df):
             # Get threshold value
             if threshold_type == 'superior_inferior':
                 try:
-                    upper = float(input("Enter upper threshold: "))
-                    lower = float(input("Enter lower threshold: "))
+                    interactive_print("Enter upper threhold: ")
+                    upper = float(input())
+                    interactive_print("Enter lower threhold")
+                    lower = float(input())
                     threshold = [upper, lower]
                 except ValueError:
                     interactive_print("Please enter valid numbers for thresholds")
                     continue
             elif threshold_type in ['string_equals', 'string_not_equals']:
-                threshold = input("Enter string to search for: ")
+                interactive_print("Enter string to search for: ")
+                threshold = input()
             else:
-                threshold_input = input("Enter threshold value: ")
+                interactive_print("Enter threshold value: ")
+                threshold_input = input()
                 try:
                     # Try to convert to numeric if possible
                     threshold = float(threshold_input)
@@ -522,7 +553,7 @@ def binarizeColumnsMenu(df):
                 interactive_print(f"Using threshold: {threshold} (Type: {threshold_type})")
                 
                 df_before = df_result.copy()
-                df_result = binarizeNumericColumn(
+                df_result = binarizeColumn(
                     df_result, source_columns, new_column_name, threshold, threshold_type
                 )
                 
@@ -612,11 +643,11 @@ if __name__ == "__main__":
     
     parser = argparse.ArgumentParser(description='Process a CSV file and save the transformed data.')
     parser.add_argument('input_file', type=str, help='Path to the input CSV file')
-    parser.add_argument('output_file', type=str, help='Path where the output CSV file will be saved')
-    parser.add_argument('--non-interactive', action='store_true', 
-                        help='Run in non-interactive mode with default settings')
     parser.add_argument('--format', type=str, choices=['csv', 'slf'], default='csv',
                         help='Output format in non-interactive mode (csv or slf)')
+    parser.add_argument('--non-interactive', action='store_true', 
+                        help='Run in non-interactive mode with default settings')
+    
     
     args = parser.parse_args()
     
@@ -632,8 +663,8 @@ if __name__ == "__main__":
         # Load the spreadsheet
         df_raw = pd.read_csv(args.input_file, sep=';', encoding='latin-1')
         
-        if is_interactive:
-            print(f"Spreadsheet loaded: {args.input_file}\n")
+        
+        interactive_print(f"Spreadsheet loaded: {args.input_file}\n")
         
         df_modif = df_raw.copy()
         
@@ -651,86 +682,69 @@ if __name__ == "__main__":
             interactive_print("- Enter 'export' to save the processed file")
             interactive_print("- Enter 'exit' to exit the program without saving")
         
-        # If non-interactive, process with default settings and exit
-        if not is_interactive:
-            # In non-interactive mode, just export the file in the requested format
-            if args.format == 'csv':
+        # Interactive mode
+        display_main_menu()
+
+        while True:
+            interactive_print("\nEnter commnd: ")
+            user_choice = input().strip().lower()
+            
+            if user_choice == 'drop':
+                # Column dropping functionality
+                columns_to_drop = readColumnsToDrop(df_modif)
+                if columns_to_drop:
+                    df_modif = df_modif.drop(columns_to_drop, axis=1)
+                    interactive_print(f"Dropped {len(columns_to_drop)} columns. Current shape: {df_modif.shape}")
+                else:
+                    interactive_print("No columns were selected for dropping.")
+                    
+            elif user_choice == 'bin':
+                # Column binarization functionality
+                df_modif = binarizeColumnsMenu(df_modif)
+                interactive_print(f"Binarization complete. Current shape: {df_modif.shape}")
+                
+            elif user_choice == 'export':
+                # Export the processed file
                 df_modif.to_csv(args.output_file, index=False, sep=';', encoding='latin-1')
-            elif args.format == 'slf':
+                interactive_print(f"File exported as CSV to: {args.output_file}")
+            
+                # Generate an SLF file with the same base name
                 slf_path = args.output_file.rsplit('.', 1)[0] + '.slf'
+                # First save as temporary CSV then convert to SLF
                 temp_csv = args.output_file + '.temp'
                 df_modif.to_csv(temp_csv, index=False)
                 csv_to_slf(temp_csv, slf_path)
+                # Remove temporary file
                 import os
                 os.remove(temp_csv)
-        else:
-            # Interactive mode
-            display_main_menu()
-            
-            while True:
-                user_choice = input("\nEnter command: ").strip().lower()
+                interactive_print(f"File exported as SLF to: {slf_path}")
                 
-                if user_choice == 'drop':
-                    # Column dropping functionality
-                    columns_to_drop = readColumnsToDrop(df_modif)
-                    if columns_to_drop:
-                        df_modif = df_modif.drop(columns_to_drop, axis=1)
-                        interactive_print(f"Dropped {len(columns_to_drop)} columns. Current shape: {df_modif.shape}")
-                    else:
-                        interactive_print("No columns were selected for dropping.")
-                        
-                elif user_choice == 'bin':
-                    # Column binarization functionality
-                    df_modif = binarizeColumnsMenu(df_modif)
-                    interactive_print(f"Binarization complete. Current shape: {df_modif.shape}")
-                    
-                elif user_choice == 'export':
-                    # Export the processed file
-                    output_format = input("Export format (csv/slf): ").strip().lower()
-                    
-                    if output_format == 'csv':
-                        df_modif.to_csv(args.output_file, index=False, sep=';', encoding='latin-1')
-                        interactive_print(f"File exported as CSV to: {args.output_file}")
-                    elif output_format == 'slf':
-                        # Generate an SLF file with the same base name
-                        slf_path = args.output_file.rsplit('.', 1)[0] + '.slf'
-                        # First save as temporary CSV then convert to SLF
-                        temp_csv = args.output_file + '.temp'
-                        df_modif.to_csv(temp_csv, index=False)
-                        csv_to_slf(temp_csv, slf_path)
-                        # Remove temporary file
-                        import os
-                        os.remove(temp_csv)
-                        interactive_print(f"File exported as SLF to: {slf_path}")
-                    else:
-                        interactive_print(f"Unsupported format: {output_format}. Please choose 'csv' or 'slf'.")
-                        continue
-                    
-                    interactive_print("Would you like to continue editing? (y/n)")
-                    continue_edit = input().strip().lower()
-                    if continue_edit != 'y':
-                        interactive_print("Processing complete!")
-                        break
-                        
-                elif user_choice == 'info':
-                    # Display current dataframe information
-                    interactive_print(f"\n===== DataFrame Information =====")
-                    interactive_print(f"Current shape: {df_modif.shape}")
-                    interactive_print(f"Number of columns: {len(df_modif.columns)}")
-                    interactive_print(f"Number of rows: {len(df_modif)}")
-                    interactive_print(f"Column types:")
-                    for col, dtype in df_modif.dtypes.items():
-                        interactive_print(f"  - {col}: {dtype}")
-                        
-                elif user_choice == 'exit':
-                    interactive_print("Exiting without saving.")
+                
+                interactive_print("Would you like to continue editing? (y/n)")
+                continue_edit = input().strip().lower()
+                if continue_edit != 'y':
+                    interactive_print("Processing complete!")
                     break
-                elif user_choice == 'h':
-                    display_main_menu()
                     
-                else:
-                    interactive_print("Invalid command.")
-                    display_main_menu()
+            elif user_choice == 'info':
+                # Display current dataframe information
+                interactive_print(f"\n===== DataFrame Information =====")
+                interactive_print(f"Current shape: {df_modif.shape}")
+                interactive_print(f"Number of columns: {len(df_modif.columns)}")
+                interactive_print(f"Number of rows: {len(df_modif)}")
+                interactive_print(f"Column types:")
+                for col, dtype in df_modif.dtypes.items():
+                    interactive_print(f"  - {col}: {dtype}")
+                    
+            elif user_choice == 'exit':
+                interactive_print("Exiting without saving.")
+                break
+            elif user_choice == 'h':
+                display_main_menu()
+                
+            else:
+                interactive_print("Invalid command.")
+                display_main_menu()
                 
     except FileNotFoundError:
         print(f"\nError: The file '{args.input_file}' was not found.")
