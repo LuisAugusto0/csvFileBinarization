@@ -12,6 +12,7 @@ drop
 57-61
 68-78
 80-82
+85
 done
 bin
 Duration of pain  before consultation (days)
@@ -22,7 +23,7 @@ Oxygen saturation (SaO2) at admission
 Low/very low Oxygen saturation (SaO2)
 superior
 95
-Axillary temperature (°C)
+Axillary temperature (C)
 High fever
 inferior
 38
@@ -36,15 +37,11 @@ superior
 101
 Labored breathing
 Labored breathing
-string_not_equals
-nan
-labored breathing
-Labored breathing
-string_not_equals
+string_not_contains
 nan
 Score interpretation
 Moderate or severe asthma crisis
-string_not_equals
+string_not_contains
 nan,Mild crisis
 C-reactive protein
 Medium or high C-reative protein
@@ -56,39 +53,38 @@ inferior
 0.05
 Main diagnostic
 Pneumonia
-string_equals
+string_contains
 pneumonia,Asthma attack + Pneumonia,Staphylococcal pneumonia
 Main diagnostic
 Asthma attack
-string_equals
+string_contains
 asthma,Asthma attack,Asthma attack + Pneumonia,Infant asthma
 Main diagnostic
 Bronchiolitis
-string_equals
+string_contains
 bronchiolitis,Bronchiolitis (1st episode),Bronchiolitis (2nd episode),Bronchiolitis (3rd episode),Bronchiolitis + Pneumonia
 Main diagnostic
 Pneumopathy
-string_equals
+string_contains
 Dyspneic pneumopathy,Interstitial pneumopathy
 Blood culture results
 Positive blood culture
 string_not_equals
-nan,Negative
-Nasopharyngeal aspirate culture (NPA) Identification 1,Nasopharyngeal aspirate culture (NPA) Identification 2
+n/a,Negative
+Nasopharyngeal aspirate culture (NPA) Identification 1
 Positive NPA culture
 string_not_equals
-nan,Negative
-Detection of DNA/RNA (TrueScience Respifinder Pathogen Identification Panel) Allele  1, Detection of DNA/RNA (TrueScience Respifinder Pathogen Identification Panel)  Allele  2, Detection of DNA/RNA (TrueScience Respifinder Pathogen Identification Panel)  Allele  3, Detection of DNA/RNA (TrueScience Respifinder Pathogen Identification Panel)  Allele  4, Detection of DNA/RNA (TrueScience Respifinder Pathogen Identification Panel)  Allele  5
+n/a,Negative
+Detection of DNA/RNA (TrueScience Respifinder Pathogen Identification Panel) Allele  1,Detection of DNA/RNA (TrueScience Respifinder Pathogen Identification Panel)  Allele  2,Detection of DNA/RNA (TrueScience Respifinder Pathogen Identification Panel)  Allele  3,Detection of DNA/RNA (TrueScience Respifinder Pathogen Identification Panel)  Allele  4,Detection of DNA/RNA (TrueScience Respifinder Pathogen Identification Panel)  Allele  5
 Virus identification
 string_not_equals
-nan,Negative
-a
-
-Yes
-No,nan
+n/a
+l
 done
-drop
-_temp_combined
+bin
+a
+Yes
+No
 done
 export
 n

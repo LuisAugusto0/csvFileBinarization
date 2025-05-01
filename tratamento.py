@@ -15,9 +15,11 @@ def interactive_print(*print_args, **print_kwargs):
 def normalize_string(name):
     """Normalize a column name by removing whitespace and replacing special characters (excluding hyphen and comma) with underscores"""
     name = str(name).strip().lower()  # Convert to string, strip whitespace, and lowercase
-    name = re.sub(r'[^\w\s,-]', '_', name)  # Replace non-word/non-space/non-hyphen/non-comma chars with _
+    name = re.sub(r'[^\w\s/,-]', '_', name)  # Replace non-word/non-space/non-hyphen/non-comma chars with _
     name = re.sub(r'\s+', '_', name)      # Replace spaces with _
     name = re.sub(r'_+', '_', name)        # Collapse multiple _ into one
+    name = name.strip('_')  # Remove any _ at the start or end of the string
+
     return name
 
 def scan_input(prompt):
@@ -44,7 +46,7 @@ def arrayTest(array, value):
             return True
     return False
 
-def arrayStringTest(array, string_methods):
+def arrayStringContainsTest(array, string_methods):
     """
     Tests if any of the values in the array is contained in the given string series
     
@@ -57,12 +59,41 @@ def arrayStringTest(array, string_methods):
     """
     # Create a mask that starts with all False
     result = pd.Series(False, index=string_methods._parent.index)
-    
     # For each threshold, update the mask where the strings contain that threshold
     for threshold in array:
+        threshold = f".{threshold}."
         result = result | string_methods.contains(threshold, na=False)
     
     return result
+
+def arrayStringEqualsTest(array, string_methods, valid_columns):
+    """
+    Tests if any of the values in the array is contained in the given string series
+    
+    Args:
+        array: Array of strings to check for
+        string_methods: The string accessor (Series.str) to check against
+        
+    Returns:
+        Series: Boolean Series with True where any value in array is found
+    """
+
+    # For each threshold, update the mask where the strings contain that threshold
+    print(f"Array: {array}")
+    print(f"Valid columns: {valid_columns}")
+    number_of_columns = len(valid_columns)
+    print(f"Number of columns: {number_of_columns}")
+    i = 0
+    for threshold in array:
+        thresholdFinal = ""
+        for _ in range(number_of_columns):
+            thresholdFinal += threshold + "."
+        thresholdFinal = thresholdFinal[:-1]  # Remove the last dot
+        array[i] = thresholdFinal
+        print(f"threshold final{i}: {array[i]}")
+        i += 1
+    
+    return arrayStringContainsTest(array, string_methods)
 
 def arrayStringTestNot(array, string_methods):
     """
@@ -93,8 +124,9 @@ def binarizeColumn(df, column_names, new_column_name, threshold, threshold_type)
         column_names: Name(s) of column(s) to be binarized (string or list of strings)
         new_column_name: Name of the column after binarization
         threshold: Threshold for binarization
-        threshold_type: Type of threshold ('superior', 'inferior', 'superior_inferior', 
-                      'equals', 'not_equals', 'string_contains' or 'string_not_contains')
+        threshold_type: Type of threshold ('superior', 'inferior', 'superior inferior', 
+                      'equals', 'not equals', 'string contains', 'string not contains',
+                        'string equals' or 'string not equals')
         
     Returns:
         pandas.DataFrame: Modified DataFrame
@@ -122,7 +154,15 @@ def binarizeColumn(df, column_names, new_column_name, threshold, threshold_type)
     interactive_print(f"Performing binarization on columns: {', '.join(valid_columns)}")
 
     # Create a temporary working column if multiple columns are provided
-    if len(valid_columns) > 1:
+    if threshold_type == 'string_contains' or threshold_type == 'string_not_contains' or threshold_type == 'string_equals' or threshold_type == 'string_not_equals':
+        # Create concatenated string column for text search
+        df['_temp_combined'] = df[valid_columns].astype(str).apply(lambda col: col.map(normalize_string)).agg(lambda x: '.' + '.'.join(x) + '.', axis=1)
+        # Replace NaN values with 'n/a' in the temporary column
+        df['_temp_combined'] = df['_temp_combined'].fillna('n/a')
+        working_column = '_temp_combined'
+        print(f"Temporary column created for string search: {df['_temp_combined'].value_counts()}")
+        print(f"{df['_temp_combined'].head()}")
+    elif len(valid_columns) > 1:
         # Choose appropriate combination based on threshold_type
         if threshold_type in ('superior', 'not_Equals'):
             # Use any (logical OR) - if any column meets condition
@@ -137,13 +177,7 @@ def binarizeColumn(df, column_names, new_column_name, threshold, threshold_type)
         # Use the single valid column directly
         working_column = valid_columns[0]
         
-    if threshold_type == 'string_contains' or threshold_type == 'string_not_contains':
-        # Create concatenated string column for text search
-        df['_temp_combined'] = df[valid_columns].astype(str).apply(lambda col: col.map(normalize_string)).agg(lambda x: '/' + '/'.join(x) + '/', axis=1)
-        # df['_temp_combined'] = df[valid_columns].astype(str).apply(lambda col: col.map(normalize_string)).agg(' '.join, axis=1)
-        working_column = '_temp_combined'
-        print(f"Temporary column created for string search: {df['_temp_combined'].value_counts()}")
-        print(f"{df['_temp_combined'].head()}")
+    
     
     
     # Perform the binarization based on threshold_type
@@ -165,22 +199,32 @@ def binarizeColumn(df, column_names, new_column_name, threshold, threshold_type)
             df[new_column_name] = np.where(not arrayTest(df[working_column], threshold), "1", "0")
     elif threshold_type == 'string_contains':
         if not "," in threshold:
-            # threshold = f"/{threshold}/"
-            df[new_column_name] = np.where(df[working_column].str.contains(threshold, na=False), "1", "0")
+            df[new_column_name] = np.where(arrayStringContainsTest([threshold], df[working_column].str), "1", "0")
         else:
             threshold = threshold.split(",")
-            # threshold = [f"/{item.strip()}/" for item in threshold]
             # Apply the arrayStringTest function to get a boolean Series
-            df[new_column_name] = np.where(arrayStringTest(threshold, df[working_column].str), "1", "0")
+            df[new_column_name] = np.where(arrayStringContainsTest(threshold, df[working_column].str), "1", "0")
     elif threshold_type == 'string_not_contains':
         if not "," in threshold:
-            # threshold = f"/{threshold}/"
-            df[new_column_name] = np.where(df[working_column].str.contains(threshold, na=False), "0", "1")
+            df[new_column_name] = np.where(arrayStringContainsTest([threshold], df[working_column].str), "0", "1")
         else:
             threshold = threshold.split(",")
-            # threshold = [f"/{item.strip()}/" for item in threshold]
             # Apply the arrayStringTestNot function to get a boolean Series
-            df[new_column_name] = np.where(arrayStringTestNot(threshold, df[working_column].str), "1", "0")
+            df[new_column_name] = np.where(arrayStringContainsTest(threshold, df[working_column].str), "0", "1")
+    elif threshold_type == 'string_equals':
+        if not "," in threshold:
+            df[new_column_name] = np.where(arrayStringEqualsTest([threshold], df[working_column].str, valid_columns), "1", "0")
+        else:
+            threshold = threshold.split(",")
+            # Apply the arrayStringTest function to get a boolean Series
+            df[new_column_name] = np.where(arrayStringEqualsTest(threshold, df[working_column].str, valid_columns), "1", "0")
+    elif threshold_type == 'string_not_equals':
+        if not "," in threshold:
+            df[new_column_name] = np.where(arrayStringEqualsTest([threshold], df[working_column].str, valid_columns), "0", "1")
+        else:
+            threshold = threshold.split(",")
+            # Apply the arrayStringTestNot function to get a boolean Series
+            df[new_column_name] = np.where(arrayStringEqualsTest(threshold, df[working_column].str, valid_columns), "0", "1")
     else:
         print(f"Invalid threshold type: {threshold}. Use 'superior', 'inferior', etc.")
         return df
@@ -405,6 +449,8 @@ def binarizeColumnsMenu(df):
         interactive_print("- 'not_equals': Mark when value == threshold")
         interactive_print("- 'string_contains': Mark when string contains threshold")
         interactive_print("- 'string_not_contains': Mark when string doesn't contain threshold")
+        interactive_print("- 'string_equals': Mark when string == threshold (for multiple values, if all are equal)")
+        interactive_print("- 'string_not_equals': Mark when string != threshold (for multiple values, if all are different)")
     
     def display_menu():
         """Helper function to display menu options"""
@@ -542,43 +588,26 @@ def binarizeColumnsMenu(df):
             interactive_print("\n=== Automatic String Replacement ===")
             interactive_print("This will replace specific values with '1' or ''0'' across selected columns.")
             
-            # Get columns to process
-            current_columns = list(df_result.columns)
-            display_columns(current_columns, binarized_columns_history)
-            
-            col_input = scan_input("\nEnter column indices or names separated by commas (leave empty for all columns):")
-            
-            if col_input:
-                # Parse each item (could be index or name)
-                items = [item.strip() for item in col_input.split(',')]
-                columns_to_process = []
-                
-                for item in items:
-                    col = get_column_from_input(item, current_columns)
-                    if col is not None:
-                        columns_to_process.append(col)
-                
-                if not columns_to_process:
-                    interactive_print("No valid columns selected!")
-                    continue
-            else:
-                # Use all columns if no specific selection
-                columns_to_process = current_columns
+           
             
             # Get values to replace with "1"
             yes_list_input = scan_input("\nEnter values to replace with '1' (comma-separated):")
             yes_list = [item.strip() for item in yes_list_input.split(',') if item.strip()]
+
+            # Get values to replace with "1"
+            yes_list_input = scan_input("\nEnter values to replace with '0' (comma-separated):")
+            no_list = [item.strip() for item in yes_list_input.split(',') if item.strip()]
             
             
-            if not yes_list:
+            if not yes_list and not no_list:
                 interactive_print("No replacement values provided, operation cancelled.")
                 continue
             
-            
             # Confirm the operation
             interactive_print("\nReady to perform the following replacements:")
-            interactive_print(f"In columns: {', '.join(columns_to_process)}")
+            # interactive_print(f"In columns: {', '.join(columns_to_process)}")
             interactive_print(f"Replace {yes_list} with '1'")
+            interactive_print(f"Replace {no_list} with '0'")
             
             # if is_interactive:
             #     confirm = input("\nConfirm operation? (y/n): ").strip().lower()
@@ -590,30 +619,14 @@ def binarizeColumnsMenu(df):
             try:
                 df_before = df_result.copy()
                 
-                # Track changes for reporting
-                changes_made = 0
-                affected_columns = []
+                for val in yes_list:
+                    # Normalize the value of the column and replace it with "1" if it matches the value
+                    df_result = df_result.apply(lambda col: col.map(lambda x: "1" if normalize_string(x) == normalize_string(val) else x))
+                for val in no_list:
+                    # Normalize the value of the column and replace it with "0" if it matches the value
+                    df_result = df_result.apply(lambda col: col.map(lambda x: "0" if normalize_string(x) == normalize_string(val) else x))
                 
-                for col in columns_to_process:
-                    binarizeColumn(df_result, col, col+"_bin", yes_list, 'string_contains')
-                
-                # Report results
-                if changes_made > 0:
-                    interactive_print(f"\nReplacement complete! {changes_made} values replaced across {len(affected_columns)} columns.")
-                    interactive_print(f"Affected columns: {', '.join(affected_columns)}")
-                    
-                    # Add affected columns to the tracking set
-                    for col in affected_columns:
-                        auto_replaced_columns.add(col)
-                    
-                    # Add to history with a special entry
-                    binarized_columns_history.append(
-                        (affected_columns, "MULTIPLE_COLUMNS", [yes_list], "auto_replacement", 
-                         {"columns": len(affected_columns), "values_replaced": changes_made})
-                    )
-                else:
-                    interactive_print("No values were replaced. Check your input values and try again.")
-                    
+                print(f"\nReplacement complete! values replaced across all columns.")
             except Exception as e:
                 print(f"Error during automatic replacement: {str(e)}")
                 df_result = df_before  # Restore previous state on error
@@ -655,14 +668,14 @@ def binarizeColumnsMenu(df):
                 continue
             
             is_overwriting = True
-            if is_interactive:
-                # Check if we're replacing an existing column
-                is_overwriting = False
-                if new_column_name in df_result.columns:
-                    overwrite = input(f"Column '{new_column_name}' already exists. Overwrite? (y/n): ").lower()
-                    if overwrite != 'y':
-                        continue
-                    is_overwriting = True
+            # if is_interactive:
+            #     # Check if we're replacing an existing column
+            #     is_overwriting = False
+            #     if new_column_name in df_result.columns:
+            #         overwrite = input(f"Column '{new_column_name}' already exists. Overwrite? (y/n): ").lower()
+            #         if overwrite != 'y':
+            #             continue
+            #         is_overwriting = True
             
             # Check if we're replacing an original column
             replacing_originals = [col for col in source_columns if col == new_column_name]
@@ -689,7 +702,7 @@ def binarizeColumnsMenu(df):
             threshold_type = scan_input("Enter threshold type: ")
             
             valid_types = ['superior', 'inferior', 'superior_inferior', 
-                           'equals', 'not_equals', 'string_contains', 'string_not_contains']
+                           'equals', 'not_equals', 'string_contains', 'string_not_contains', 'string_equals', 'string_not_equals']
             if threshold_type not in valid_types:
                 interactive_print(f"Invalid threshold type. Please choose from: {', '.join(valid_types)}")
                 continue
@@ -917,8 +930,6 @@ if __name__ == "__main__":
             
                 # Generate an SLF file with the same base name
                 slf_path = args.output_file.rsplit('.', 1)[0] + '.slf'
-                
-                df_modif.to_csv(csv_path, index=False)
                 csv_to_slf(csv_path, slf_path)
                 
                 interactive_print(f"File exported as SLF to: {slf_path}")
