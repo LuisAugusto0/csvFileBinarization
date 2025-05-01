@@ -4,10 +4,29 @@ import numpy as np
 from xml.etree.ElementTree import Element, SubElement, tostring
 from xml.dom import minidom
 import argparse
+import re
+import os
+import traceback
 
 def interactive_print(*print_args, **print_kwargs):
     if is_interactive:
         print(*print_args, **print_kwargs)
+
+def normalize_string(name):
+    """Normalize a column name by removing whitespace and replacing special characters (excluding hyphen and comma) with underscores"""
+    name = str(name).strip().lower()  # Convert to string, strip whitespace, and lowercase
+    name = re.sub(r'[^\w\s,-]', '_', name)  # Replace non-word/non-space/non-hyphen/non-comma chars with _
+    name = re.sub(r'\s+', '_', name)      # Replace spaces with _
+    name = re.sub(r'_+', '_', name)        # Collapse multiple _ into one
+    return name
+
+def scan_input(prompt):
+    """Scan input from the user with a prompt"""
+    if is_interactive:
+        return normalize_string(input(prompt))
+    else:
+        # In non-interactive mode, read from standard input
+        return normalize_string(input())
 
 def arrayTest(array, value):
     """
@@ -25,21 +44,45 @@ def arrayTest(array, value):
             return True
     return False
 
-def arrayStringTest(array, value):
+def arrayStringTest(array, string_methods):
     """
-    Tests if a value is in the string array
+    Tests if any of the values in the array is contained in the given string series
     
     Args:
-        array: Array to be tested
-        value: Value (string) to be tested
+        array: Array of strings to check for
+        string_methods: The string accessor (Series.str) to check against
         
     Returns:
-        bool: True if the value is in the array, False otherwise
+        Series: Boolean Series with True where any value in array is found
     """
-    for i in range(len(array)):
-        if array[i].contains(value, na=False):
-            return True
-    return False
+    # Create a mask that starts with all False
+    result = pd.Series(False, index=string_methods._parent.index)
+    
+    # For each threshold, update the mask where the strings contain that threshold
+    for threshold in array:
+        result = result | string_methods.contains(threshold, na=False)
+    
+    return result
+
+def arrayStringTestNot(array, string_methods):
+    """
+    Tests if none of the values in the array are contained in the given string
+    
+    Args:
+        array: Array of strings to check for
+        string_methods: The string accessor (Series.str) to check against
+        
+    Returns:
+        Series: Boolean Series with True where no value in array is found
+    """
+    # Create a mask that starts with all True
+    result = pd.Series(True, index=string_methods._parent.index)
+    
+    # For each threshold, update the mask to exclude strings containing the threshold
+    for threshold in array:
+        result = result & ~string_methods.contains(threshold, na=False)
+    
+    return result
     
 def binarizeColumn(df, column_names, new_column_name, threshold, threshold_type):
     """
@@ -77,7 +120,7 @@ def binarizeColumn(df, column_names, new_column_name, threshold, threshold_type)
         return df
     
     interactive_print(f"Performing binarization on columns: {', '.join(valid_columns)}")
-    
+
     # Create a temporary working column if multiple columns are provided
     if len(valid_columns) > 1:
         # Choose appropriate combination based on threshold_type
@@ -87,12 +130,13 @@ def binarizeColumn(df, column_names, new_column_name, threshold, threshold_type)
         elif threshold_type in ('inferior', 'equals'):
             # Use all (logical AND) - all columns must meet condition
             df['_temp_combined'] = df[valid_columns].max(axis=1)
-        elif threshold_type == 'string_Equals':
-            # Create concatenated string column for text search
-            df['_temp_combined'] = df[valid_columns].astype(str).agg(' '.join, axis=1)
-        elif threshold_type == 'string_Not_Equals':
-            # Create concatenated string column for text search
-            df['_temp_combined'] = df[valid_columns].astype(str).agg(' '.join, axis=1)
+        # elif threshold_type == 'string_equals':
+        #     # Create concatenated string column for text search
+        #     df['_temp_combined'] = df[valid_columns].astype(str).agg('/'.join, axis=1)
+        #     print(f"Temporary column created for string search: {df['_temp_combined']}")
+        # elif threshold_type == 'string_not_Equals':
+        #     # Create concatenated string column for text search
+        #     df['_temp_combined'] = df[valid_columns].astype(str).agg('/'.join, axis=1)
         elif threshold_type == 'superior_inferior':
             # For range checks, use the mean of each row
             df['_temp_combined'] = df[valid_columns].mean(axis=1)
@@ -102,39 +146,52 @@ def binarizeColumn(df, column_names, new_column_name, threshold, threshold_type)
         
         # Use the temporary column for the binarization
         working_column = '_temp_combined'
+    elif threshold_type == 'string_equals' or threshold_type == 'string_not_equals':
+        # Create concatenated string column for text search
+        df['_temp_combined'] = df[valid_columns].astype(str).apply(lambda col: col.map(normalize_string)).agg(lambda x: '/' + '/'.join(x) + '/', axis=1)
+        working_column = '_temp_combined'
+        print(f"Temporary column created for string search: {df['_temp_combined'].value_counts()}")
     else:
         # Use the single valid column directly
         working_column = valid_columns[0]
     
     # Perform the binarization based on threshold_type
     if threshold_type == 'superior':
-        df[new_column_name] = np.where(df[working_column] < threshold, "X", "")
+        df[new_column_name] = np.where(df[working_column] < threshold, "1", "0")
     elif threshold_type == 'inferior':
-        df[new_column_name] = np.where(df[working_column] > threshold, "X", "")
+        df[new_column_name] = np.where(df[working_column] > threshold, "1", "0")
     elif threshold_type == 'superior_inferior':
-        df[new_column_name] = np.where((df[working_column] < threshold[0]) & (df[working_column] > threshold[1]), "X", "")
+        df[new_column_name] = np.where((df[working_column] < threshold[0]) & (df[working_column] > threshold[1]), "1", "0")
     elif threshold_type == 'equals':
         if isinstance(threshold, (int, float)):
-            df[new_column_name] = np.where(df[working_column] == threshold, "X", "")
+            df[new_column_name] = np.where(df[working_column] == threshold, "1", "0")
         else:
-            df[new_column_name] = np.where(arrayTest(df[working_column], threshold), "X", "")
-    elif threshold_type == 'not_Equals':
+            df[new_column_name] = np.where(arrayTest(df[working_column], threshold), "1", "0")
+    elif threshold_type == 'not_equals':
         if isinstance(threshold, (int, float)):
-            df[new_column_name] = np.where(df[working_column] != threshold, "X", "")
+            df[new_column_name] = np.where(df[working_column] != threshold, "1", "0")
         else:
-            df[new_column_name] = np.where(not arrayTest(df[working_column], threshold), "X", "")
-    elif threshold_type == 'string_Equals':
-        if isinstance(threshold, str):
-            df[new_column_name] = np.where(df[working_column].str.contains(threshold, na=False), "X", "")
+            df[new_column_name] = np.where(not arrayTest(df[working_column], threshold), "1", "0")
+    elif threshold_type == 'string_equals':
+        if not "," in threshold:
+            threshold = f"/{threshold}/"
+            df[new_column_name] = np.where(df[working_column].str.contains(threshold, na=False), "1", "0")
         else:
-            df[new_column_name] = np.where(arrayStringTest(df[working_column].str, threshold), "X", "")
-    elif threshold_type == 'string_Not_Equals':
-        if isinstance(threshold, str):
-            df[new_column_name] = np.where(~df[working_column].str.contains(threshold, na=False), "", "X")
+            threshold = threshold.split(",")
+            threshold = [f"/{item.strip()}/" for item in threshold]
+            # Apply the arrayStringTest function to get a boolean Series
+            df[new_column_name] = np.where(arrayStringTest(threshold, df[working_column].str), "1", "0")
+    elif threshold_type == 'string_not_equals':
+        if not "," in threshold:
+            threshold = f"/{threshold}/"
+            df[new_column_name] = np.where(df[working_column].str.contains(threshold, na=False), "0", "1")
         else:
-            df[new_column_name] = np.where(not arrayStringTest(df[working_column].str, threshold), "", "X")
+            threshold = threshold.split(",")
+            threshold = [f"/{item.strip()}/" for item in threshold]
+            # Apply the arrayStringTestNot function to get a boolean Series
+            df[new_column_name] = np.where(arrayStringTestNot(threshold, df[working_column].str), "1", "0")
     else:
-        print("Invalid threshold type. Use 'superior', 'inferior', etc.")
+        print(f"Invalid threshold type: {threshold}. Use 'superior', 'inferior', etc.")
         return df
     
     # Clean up temporary column if it was created
@@ -179,21 +236,19 @@ def readColumnsToDrop(df):
         interactive_print("- Enter 'u' to access the undo menu")
         interactive_print("- Enter 'l' to list all columns again")
         interactive_print("- Enter 'r' to display  only columns marked for removal")
-        interactive_print("- Enter 'h' to this menumenumenumenumenumenu again")
+        interactive_print("- Enter 'h' to this menu again")
         interactive_print("- Enter 'done' to finish selection")
     
     display_columns(df_columns, columns_to_drop)
     display_menu()
     
     while True:
-        interactive_print("\nEnter commnd")
-        user_input = input().strip().lower()
+        user_input = scan_input("\nEnter command: ")
         
         if user_input == 'done':
             break
         elif user_input == 'l':
             display_columns(df_columns, columns_to_drop)
-            continue
         elif user_input == 'r':
             if columns_to_drop:
                 interactive_print("\n=== Columns Marked for Removal ===")
@@ -206,76 +261,100 @@ def readColumnsToDrop(df):
                     interactive_print(f"{i}. {col}{reason}")
             else:
                 interactive_print("No columns are currently marked for removal.")
-            continue
         elif user_input == 'u':
             if not removed_columns_history:
                 interactive_print("No actions to undo!")
                 continue
-                
-            interactive_print("\n=== Undo Menu ===")
+            
             interactive_print("Recently removed columns:")
             for i, (col, reason) in enumerate(removed_columns_history):
                 interactive_print(f"{i}. {col} - {reason}")
-            
-            interactive_print("Enter index to restore (or 'back' to return): ")
-            undo_input = input()
-            if undo_input.lower() == 'back':
-                continue
-                
-            try:
-                undo_index = int(undo_input)
-                if 0 <= undo_index < len(removed_columns_history):
-                    col_to_restore, _ = removed_columns_history.pop(undo_index)
-                    if col_to_restore in columns_to_drop:
-                        columns_to_drop.remove(col_to_restore)
-                        interactive_print(f"Restored column: {col_to_restore}")
+            interactive_print("\n=== Undo Menu ===")   
+            undo_input = scan_input("Enter index or range to restore (e.g., '2' or '2-4', or 'back' to return): ")
+            while undo_input != 'back':
+                try:
+                    if '-' in undo_input:
+                        # Handle range input
+                        start_idx, end_idx = map(int, undo_input.split('-'))
+                        if 0 <= start_idx <= end_idx < len(removed_columns_history):
+                            # Create a list of items to restore (in reverse order)
+                            items_to_restore = [removed_columns_history[i] for i in range(start_idx, end_idx + 1)]
+                            
+                            # Remove these items from history (starting from the end to avoid index shifting)
+                            for i in range(end_idx, start_idx - 1, -1):
+                                removed_columns_history.pop(i)
+                            
+                            # Now restore all items
+                            for col_to_restore, reason in items_to_restore:
+                                if col_to_restore in columns_to_drop:
+                                    columns_to_drop.remove(col_to_restore)
+                                    interactive_print(f"Restored column: {col_to_restore}")
+                                else:
+                                    interactive_print(f"Warning: Column {col_to_restore} was not in removal list")
+                        else:
+                            interactive_print("Invalid range! Please enter valid indices.")
                     else:
-                        interactive_print(f"Warning: Column {col_to_restore} was not in removal list")
-                else:
-                    interactive_print("Invalid index!")
-            except ValueError:
-                interactive_print("Please enter a valid number")
-            continue
+                        # Handle single index input
+                        undo_index = int(undo_input)
+                        if 0 <= undo_index < len(removed_columns_history):
+                            col_to_restore, _ = removed_columns_history.pop(undo_index)
+                            if col_to_restore in columns_to_drop:
+                                columns_to_drop.remove(col_to_restore)
+                                interactive_print(f"Restored column: {col_to_restore}")
+                            else:
+                                interactive_print(f"Warning: Column {col_to_restore} was not in removal list")
+                        else:
+                            interactive_print("Invalid index!")
+                except ValueError:
+                    interactive_print("Invalid input! Please enter a valid index or range.")
+                if(len(removed_columns_history) == 0):
+                    interactive_print("No actions to undo!")
+                    break
+                interactive_print("\nRecently removed columns:")
+                for i, (col, reason) in enumerate(removed_columns_history):
+                    interactive_print(f"{i}. {col} - {reason}")
+                undo_input = scan_input("Enter index or range to restore (e.g., '2' or '2-4', or 'back' to return): ")
         elif user_input == 'h':
             display_menu()
-            continue
-
-        try:
-            # Parse range input
-            if '-' in user_input:
-                start, end = map(int, user_input.split('-'))
-                if (isinstance(start, str)) and (not start.isdigit()):
-                    start = df_columns.index(start)
-                if (isinstance(end, str)) and (not end.isdigit()):
-                    end = df_columns.index(end)
-                # Ensure valid range
-                if 0 <= start <= end < len(df_columns):
-                    # Add columns to drop list with reason
-                    for i in range(start, end + 1):
-                        col = df_columns[i]
+        else:
+            try:
+                # Parse range input
+                if '-' in user_input:
+                    start, end = map(int, user_input.split('-'))
+                    if (isinstance(start, str)) and (not start.isdigit()):
+                        start = df_columns.index(start)
+                    if (isinstance(end, str)) and (not end.isdigit()):
+                        end = df_columns.index(end)
+                    # Ensure valid range
+                    if 0 <= start <= end < len(df_columns):
+                        # Add columns to drop list with reason
+                        for i in range(start, end + 1):
+                            col = df_columns[i]
+                            if col not in columns_to_drop:
+                                columns_to_drop.append(col)
+                                removed_columns_history.append((col, f"Manual selection (range {start}-{end})"))
+                        interactive_print(f"Marked columns {start} to {end} for removal")
+                    else:
+                        interactive_print("Invalid range! Please enter valid column indices.")
+                else:
+                    # Single column case
+                    if  (isinstance(user_input, str)) and (not user_input.isdigit()):
+                        user_input = df_columns.index(user_input)
+                    index = int(user_input)
+                    if 0 <= index < len(df_columns):
+                        col = df_columns[index]
                         if col not in columns_to_drop:
                             columns_to_drop.append(col)
-                            removed_columns_history.append((col, f"Manual selection (range {start}-{end})"))
-                    interactive_print(f"Marked columns {start} to {end} for removal")
-                else:
-                    interactive_print("Invalid range! Please enter valid column indices.")
-            else:
-                # Single column case
-                if  (isinstance(undo_input, str)) and (not user_input.isdigit()):
-                    user_input = df_columns.index(user_input)
-                index = int(user_input)
-                if 0 <= index < len(df_columns):
-                    col = df_columns[index]
-                    if col not in columns_to_drop:
-                        columns_to_drop.append(col)
-                        removed_columns_history.append((col, f"Manual selection (index {index})"))
-                        interactive_print(f"Marked column '{col}' for removal")
+                            removed_columns_history.append((col, f"Manual selection (index {index})"))
+                            interactive_print(f"Marked column '{col}' for removal")
+                        else:
+                            interactive_print(f"Column '{col}' is already marked for removal")
                     else:
-                        interactive_print(f"Column '{col}' is already marked for removal")
-                else:
-                    interactive_print("Invalid index! Please enter a valid column index.")
-        except ValueError:
-            interactive_print("Invalid input! Please use the format shown in the menu.")
+                        interactive_print("Invalid index! Please enter a valid column index.")
+            except ValueError:
+                interactive_print("Invalid input! Please use the format shown in the menu.")
+                traceback.print_exc()
+
     
     # Summary - always displayed
     print(f"\n=== Summary: {len(columns_to_drop)} columns selected for removal ===")
@@ -284,7 +363,6 @@ def readColumnsToDrop(df):
             print(f"- {col}")
     print("================================================\n")
     return columns_to_drop
-
 
 def binarizeColumnsMenu(df):
     """
@@ -300,6 +378,8 @@ def binarizeColumnsMenu(df):
     df_columns = list(df.columns)  # Get original column list
     binarized_columns_history = []  # Track binarized columns for display
     columns_to_drop = []  # Track columns that will be dropped at the end
+    replaced_columns = []  # Track columns that have been replaced (should not be auto-dropped)
+    auto_remove_base_columns = True  # Flag to control auto removal at the end
     
     interactive_print("\n===== Column Binarization Menu =====")
     
@@ -337,13 +417,19 @@ def binarizeColumnsMenu(df):
     def display_menu():
         """Helper function to display menu options"""
         interactive_print("\n=== Column Binarization Options ===")
-        interactive_print("- Enter an index or name to binarize olny one column")
-        interactive_print("- Enter the index or names separated by comma to binarize multiple columns")
+        interactive_print("- Enter a single index or column name (e.g. '5') to binarize a column")
+        interactive_print("- Enter a comma-separated list (e.g. '1,3,name1,5') to binarize multiple columns")
+        interactive_print("- Enter 'a' to automatically replace values with '1'/''0'' across columns")
         interactive_print("- Enter 'r' to remove a binarized column")
         interactive_print("- Enter 'l' to list all columns")
         interactive_print("- Enter 'h' to show this help menu")
         interactive_print("- Enter 's' to show binarized columns summary")
+        interactive_print("- Enter 'k' to toggle auto-removal of base columns")
         interactive_print("- Enter 'done' to finish binarization")
+        
+        # Show current auto-removal status
+        status = "ENABLED" if auto_remove_base_columns else "DISABLED"
+        interactive_print(f"Auto-removal of base columns: {status}")
     
     def get_column_from_input(input_str, current_columns):
         """
@@ -376,8 +462,7 @@ def binarizeColumnsMenu(df):
     display_menu()
     
     while True:
-        interactive_print("\nEnter commnd: ")
-        user_input = input().strip().lower()
+        user_input = scan_input("Enter command: ")
         
         if user_input == 'done':
             break
@@ -386,6 +471,12 @@ def binarizeColumnsMenu(df):
             continue
         elif user_input == 'h':
             display_menu()
+            continue
+        elif user_input == 'k':
+            # Toggle auto-removal of base columns
+            auto_remove_base_columns = not auto_remove_base_columns
+            status = "ENABLED" if auto_remove_base_columns else "DISABLED"
+            interactive_print(f"Auto-removal of base columns is now {status}")
             continue
         elif user_input == 's':
             if binarized_columns_history:
@@ -418,61 +509,152 @@ def binarizeColumnsMenu(df):
                     interactive_print(f"[{i}] {new_col} (from {src_display})")
             
             try:
-                interactive_print("Enter index of column to remove (or -1 to cancel): ")
-                remove_idx = int(input())
-                if remove_idx == -1:
+                remove_input = scan_input("Enter index or range of columns to remove ('2', '2-4', or -1 to cancel): ")
+                if remove_input == '-1':
                     continue
-                    
-                if 0 <= remove_idx < len(binarized_columns_history):
-                    _, col_to_remove, _, _, _ = binarized_columns_history[remove_idx]
-                    
-                    if col_to_remove in df_result.columns:
-                        df_result = df_result.drop(columns=[col_to_remove])
-                        interactive_print(f"Removed column: {col_to_remove}")
+
+                try:
+                    if '-' in remove_input:
+                        # Handle range input
+                        start_idx, end_idx = map(int, remove_input.split('-'))
+                        if 0 <= start_idx <= end_idx < len(binarized_columns_history):
+                            for remove_idx in range(start_idx, end_idx + 1):
+                                _, col_to_remove, _, _, _ = binarized_columns_history[remove_idx]
+                                if col_to_remove in df_result.columns:
+                                    df_result = df_result.drop(columns=[col_to_remove])
+                                    interactive_print(f"Removed column: {col_to_remove}")
+                                else:
+                                    interactive_print(f"Column {col_to_remove} has already been removed.")
+                        else:
+                            interactive_print("Invalid range! Please enter valid indices.")
                     else:
-                        interactive_print(f"Column {col_to_remove} has already been removed.")
-                else:
-                    interactive_print("Invalid index!")
+                        # Handle single index input
+                        remove_idx = int(remove_input)
+                        if 0 <= remove_idx < len(binarized_columns_history):
+                            _, col_to_remove, _, _, _ = binarized_columns_history[remove_idx]
+                            if col_to_remove in df_result.columns:
+                                df_result = df_result.drop(columns=[col_to_remove])
+                                interactive_print(f"Removed column: {col_to_remove}")
+                            else:
+                                interactive_print(f"Column {col_to_remove} has already been removed.")
+                        else:
+                            interactive_print("Invalid index!")
+                except ValueError:
+                    interactive_print("Invalid input! Please enter a valid index or range.")
             except ValueError:
                 interactive_print("Please enter a valid number")
             
             continue
-        # else
-        #     # Single or multiple column binarization
-        #     current_columns = list(df_result.columns) 
-        #     # Parse each item (could be index or name)
-        #     items = [item.strip() for item in col_input.split(',')]
-        #     # Parse range input
-        #     if '-' in user_input:
-        #         start, end = map(int, user_input.split(','))
-        #         f
-        #         if (isinstance(start, str)) and (not start.isdigit()):
-        #             start = df_columns.index(start)
-        #         if (isinstance(end, str)) and (not end.isdigit()):
-        #             end = df_columns.index(end)
-        #         # Ensure valid range
-        #         if 0 <= start <= end < len(df_columns):
-        elif user_input == 'bo' or user_input == 'bm':
-            # Single or multiple column binarization
-            current_columns = list(df_result.columns)
+        elif user_input == 'a':
+            # Automatic replacement of values across all columns
+            interactive_print("\n=== Automatic String Replacement ===")
+            interactive_print("This will replace specific values with 'X' or ''0'' across selected columns.")
             
-            if user_input == 'bo':
-                # Get column index or name
-                interactive_print("Enter column index or name to binarize:")
-                col_input = input().strip()
-                col_name = get_column_from_input(col_input, current_columns)
-                
-                if col_name is None:
-                    continue
-                
-                source_columns = [col_name]
-            else:  # Multiple columns
-                interactive_print("Enter column indices or names separated by commas (ex.: '1,3,name1,5'):")
-                col_input = input().strip()
-                
+            # Get columns to process
+            current_columns = list(df_result.columns)
+            display_columns(current_columns, binarized_columns_history)
+            
+            col_input = scan_input("\nEnter column indices or names separated by commas (leave empty for all columns):")
+            
+            if col_input:
                 # Parse each item (could be index or name)
                 items = [item.strip() for item in col_input.split(',')]
-                source_columns = []
+                columns_to_process = []
+                
+                for item in items:
+                    col = get_column_from_input(item, current_columns)
+                    if col is not None:
+                        columns_to_process.append(col)
+                
+                if not columns_to_process:
+                    interactive_print("No valid columns selected!")
+                    continue
+            else:
+                # Use all columns if no specific selection
+                columns_to_process = current_columns
+            
+            # Get values to replace with "1"
+            yes_list_input = scan_input("\nEnter values to replace with '1' (comma-separated):")
+            yes_list = [item.strip() for item in yes_list_input.split(',') if item.strip()]
+            
+            # Get values to replace with "0"
+            no_list_input = scan_input("\nEnter values to replace with '0' (comma-separated):")
+            no_list = [item.strip() for item in no_list_input.split(',') if item.strip()]
+            
+            if not yes_list and not no_list:
+                interactive_print("No replacement values provided, operation cancelled.")
+                continue
+            
+            
+            # Confirm the operation
+            interactive_print("\nReady to perform the following replacements:")
+            interactive_print(f"In columns: {', '.join(columns_to_process)}")
+            interactive_print(f"Replace {yes_list} with '1'")
+            interactive_print(f"Replace {no_list} with '0'")
+            
+            if not is_interactive:
+                confirm = input("\nConfirm operation? (y/n): ").strip().lower()
+                if confirm != 'y':
+                    interactive_print("Operation cancelled.")
+                    continue
+            
+            # Perform replacements
+            try:
+                df_before = df_result.copy()
+                
+                # Track changes for reporting
+                changes_made = 0
+                affected_columns = []
+                
+                for col in columns_to_process:
+                    if df_result[col].dtype == 'object':  # Only process string columns
+                        # Create copies to avoid modifying the lists
+                        yes_values = list(yes_list)
+                        no_values = list(no_list)
+                        
+                        # Count values before replacement
+                        values_before = df_result[col].value_counts().sum()
+                        
+                        # Perform replacements
+                        for value in yes_values:
+                            df_result[col] = df_result[col].replace(value, "X")
+                        
+                        for value in no_values:
+                            df_result[col] = df_result[col].replace(value, "")
+                        
+                        # Count changes
+                        different_values = (df_before[col] != df_result[col]).sum()
+                        if different_values > 0:
+                            changes_made += different_values
+                            affected_columns.append(col)
+                
+                # Report results
+                if changes_made > 0:
+                    interactive_print(f"\nReplacement complete! {changes_made} values replaced across {len(affected_columns)} columns.")
+                    interactive_print(f"Affected columns: {', '.join(affected_columns)}")
+                    
+                    # Add to history with a special entry
+                    binarized_columns_history.append(
+                        (affected_columns, "MULTIPLE_COLUMNS", [yes_list, no_list], "auto_replacement", 
+                         {"columns": len(affected_columns), "values_replaced": changes_made})
+                    )
+                else:
+                    interactive_print("No values were replaced. Check your input values and try again.")
+                    
+            except Exception as e:
+                print(f"Error during automatic replacement: {str(e)}")
+                df_result = df_before  # Restore previous state on error
+            
+            continue
+        else:
+            # Check if it's a direct column selection (single index, name, or comma-separated list)
+            current_columns = list(df_result.columns)
+            source_columns = []
+            
+            # Try to parse as a comma-separated list first
+            if ',' in user_input:
+                # Multiple columns specified
+                items = [item.strip() for item in user_input.split(',')]
                 
                 for item in items:
                     col = get_column_from_input(item, current_columns)
@@ -480,40 +662,58 @@ def binarizeColumnsMenu(df):
                         source_columns.append(col)
                 
                 if not source_columns:
-                    interactive_print("No valid columns selected!")
+                    interactive_print("No valid columns selected! Type 'h' for help.")
+                    continue
+            else:
+                # Try as single column
+                col = get_column_from_input(user_input, current_columns)
+                if col is not None:
+                    source_columns = [col]
+                else:
+                    interactive_print(f"Unknown command or invalid column: '{user_input}'. Type 'h' for help.")
                     continue
             
+            # If we got here, we have valid columns to binarize
             # Get new column name
-            interactive_print("Enter name for the new binarized column: ")
-            new_column_name = input().strip()
+            interactive_print(f"Selected column(s) for binarization: {', '.join(source_columns)}")
+            new_column_name = scan_input("Enter name for the new binarized column: ")
             if not new_column_name:
                 interactive_print("Column name cannot be empty!")
                 continue
             
-            # Check if we're replacing an existing column
-            is_overwriting = False
-            if new_column_name in df_result.columns:
-                overwrite = input(f"Column '{new_column_name}' already exists. Overwrite? (y/n): ").lower()
-                if overwrite != 'y':
-                    continue
-                is_overwriting = True
+            is_overwriting = True
+            if is_interactive:
+                # Check if we're replacing an existing column
+                is_overwriting = False
+                if new_column_name in df_result.columns:
+                    overwrite = input(f"Column '{new_column_name}' already exists. Overwrite? (y/n): ").lower()
+                    if overwrite != 'y':
+                        continue
+                    is_overwriting = True
+            
+            # Check if we're replacing an original column
+            replacing_originals = [col for col in source_columns if col == new_column_name]
+            for col in replacing_originals:
+                if col not in replaced_columns:
+                    replaced_columns.append(col)
             
             # Ask if original columns should be dropped after binarization
             # Skip this question if the new column has the same name as a source column
-            skip_drop_question = is_overwriting and (new_column_name in source_columns)
+            skip_drop_question = is_overwriting and any(col == new_column_name for col in source_columns)
             drop_originals = False
             
-            if not skip_drop_question:
-                interactive_print("Drop original columns after binarization? (y/n): ")
-                drop_originals = input().strip().lower()
+            if not skip_drop_question and not auto_remove_base_columns:
+                drop_originals = scan_input("Drop original columns after binarization? (y/n): ")
                 drop_originals = drop_originals == 'y'
+            elif auto_remove_base_columns:
+                drop_originals = True
+                interactive_print("Original columns will be automatically removed (auto-removal enabled).")
             else:
                 interactive_print("Note: Source column will be replaced with binarized version")
             
             # Get threshold type
             display_threshold_types()
-            interactive_print("Enter threshold type: ")
-            threshold_type = input().strip().lower()
+            threshold_type = scan_input("Enter threshold type: ")
             
             valid_types = ['superior', 'inferior', 'superior_inferior', 
                            'equals', 'not_equals', 'string_equals', 'string_not_equals']
@@ -524,20 +724,16 @@ def binarizeColumnsMenu(df):
             # Get threshold value
             if threshold_type == 'superior_inferior':
                 try:
-                    interactive_print("Enter upper threhold: ")
-                    upper = float(input())
-                    interactive_print("Enter lower threhold")
-                    lower = float(input())
+                    upper = float(scan_input("Enter upper threshold: "))
+                    lower = float(scan_input("Enter lower threshold: "))
                     threshold = [upper, lower]
                 except ValueError:
                     interactive_print("Please enter valid numbers for thresholds")
                     continue
             elif threshold_type in ['string_equals', 'string_not_equals']:
-                interactive_print("Enter string to search for: ")
-                threshold = input()
+                threshold = scan_input("Enter string to search for: ")
             else:
-                interactive_print("Enter threshold value: ")
-                threshold_input = input()
+                threshold_input = scan_input("Enter threshold value: ")
                 try:
                     # Try to convert to numeric if possible
                     threshold = float(threshold_input)
@@ -577,15 +773,43 @@ def binarizeColumnsMenu(df):
             except Exception as e:
                 # Error message always displayed
                 print(f"Error during binarization: {str(e)}")
+                traceback.print_exc()
                 df_result = df_before  # Restore previous state on error
+    
+    # Process removals: remove all base columns used in binarization operations
+    # except those that were replaced with a column of the same name
+    if auto_remove_base_columns:
+        base_columns_to_remove = set()
+        for src_col, new_col, _, _, _ in binarized_columns_history:
+            if isinstance(src_col, list):
+                for col in src_col:
+                    # Only add column if it wasn't replaced
+                    if col != new_col and col not in replaced_columns:
+                        base_columns_to_remove.add(col)
+            else:
+                # Single column case
+                if src_col != new_col and src_col not in replaced_columns:
+                    base_columns_to_remove.add(src_col)
+        
+        # Add to the columns_to_drop list
+        for col in base_columns_to_remove:
+            if col not in columns_to_drop:
+                columns_to_drop.append(col)
+                
+        if base_columns_to_remove:
+            interactive_print(f"\nAuto-removal marked {len(base_columns_to_remove)} base columns for removal")
     
     # Remove base columns if they were marked for removal
     if columns_to_drop:
         interactive_print("\n=== Removing Original Columns ===")
+        removed_count = 0
         for col in columns_to_drop:
             if col in df_result.columns:
                 df_result = df_result.drop(columns=[col])
                 interactive_print(f"Removed original column: {col}")
+                removed_count += 1
+        
+        interactive_print(f"Removed {removed_count} original columns in total.")
     
     # Summary - always displayed
     print(f"\n=== Summary: {len(binarized_columns_history)} columns binarized ===")
@@ -601,6 +825,14 @@ def binarizeColumnsMenu(df):
                 col_status = " [REMOVED]"
                 
             print(f"{i+1}. {src_display} → {new_col}{col_status} (Type: {threshold_type}, Threshold: {threshold})")
+    
+    # Display final column removal summary
+    if columns_to_drop:
+        removed_cols = [col for col in columns_to_drop if col not in df_result.columns]
+        if removed_cols:
+            print(f"\nRemoved {len(removed_cols)} original columns:")
+            for col in removed_cols:
+                print(f"- {col}")
     print("================================================\n")
     
     return df_result
@@ -643,6 +875,7 @@ if __name__ == "__main__":
     
     parser = argparse.ArgumentParser(description='Process a CSV file and save the transformed data.')
     parser.add_argument('input_file', type=str, help='Path to the input CSV file')
+    parser.add_argument('--output_file', type=str, default='output', help='Path to the input CSV file')
     parser.add_argument('--format', type=str, choices=['csv', 'slf'], default='csv',
                         help='Output format in non-interactive mode (csv or slf)')
     parser.add_argument('--non-interactive', action='store_true', 
@@ -651,9 +884,11 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     
+    
     # Check if input is from terminal or redirected
     is_interactive = os.isatty(sys.stdin.fileno()) and not args.non_interactive
     
+    # is_interactive = True  # Force interactive mode for testing
     # Function to print only in interactive mode
     def interactive_print(*print_args, **print_kwargs):
         if is_interactive:
@@ -662,12 +897,15 @@ if __name__ == "__main__":
     try:
         # Load the spreadsheet
         df_raw = pd.read_csv(args.input_file, sep=';', encoding='latin-1')
-        
+    
         
         interactive_print(f"Spreadsheet loaded: {args.input_file}\n")
         
         df_modif = df_raw.copy()
-        
+        for col in df_modif.columns:
+            # Remove leading and trailing spaces from column names
+            df_modif.rename(columns={col: normalize_string(col)}, inplace=True)
+
         # Display initial information in interactive mode only
         interactive_print(f"Initial shape: {df_modif.shape}")
         interactive_print(f"Number of columns: {len(df_modif.columns)}")
@@ -686,8 +924,7 @@ if __name__ == "__main__":
         display_main_menu()
 
         while True:
-            interactive_print("\nEnter commnd: ")
-            user_choice = input().strip().lower()
+            user_choice = scan_input("\nEnter command: ")
             
             if user_choice == 'drop':
                 # Column dropping functionality
@@ -706,7 +943,7 @@ if __name__ == "__main__":
             elif user_choice == 'export':
                 # Export the processed file
                 df_modif.to_csv(args.output_file, index=False, sep=';', encoding='latin-1')
-                interactive_print(f"File exported as CSV to: {args.output_file}")
+                interactive_print(f"File exported as CSV to: {args.output_file + '.csv'}")
             
                 # Generate an SLF file with the same base name
                 slf_path = args.output_file.rsplit('.', 1)[0] + '.slf'
@@ -715,13 +952,12 @@ if __name__ == "__main__":
                 df_modif.to_csv(temp_csv, index=False)
                 csv_to_slf(temp_csv, slf_path)
                 # Remove temporary file
-                import os
+
                 os.remove(temp_csv)
                 interactive_print(f"File exported as SLF to: {slf_path}")
                 
                 
-                interactive_print("Would you like to continue editing? (y/n)")
-                continue_edit = input().strip().lower()
+                continue_edit = scan_input("Would you like to continue editing? (y/n): ")
                 if continue_edit != 'y':
                     interactive_print("Processing complete!")
                     break
@@ -750,3 +986,4 @@ if __name__ == "__main__":
         print(f"\nError: The file '{args.input_file}' was not found.")
     except Exception as e:
         print(f"\nAn error occurred: {str(e)}")
+        traceback.print_exc()
