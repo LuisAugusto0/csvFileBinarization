@@ -36,7 +36,10 @@ superior
 101
 Labored breathing
 Labored breathing
-y
+string_not_equals
+nan
+labored breathing
+Labored breathing
 string_not_equals
 nan
 Score interpretation
@@ -79,6 +82,13 @@ Detection of DNA/RNA (TrueScience Respifinder Pathogen Identification Panel) All
 Virus identification
 string_not_equals
 nan,Negative
+a
+
+Yes
+No,nan
+done
+drop
+_temp_combined
 done
 export
 n

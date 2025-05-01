@@ -380,6 +380,7 @@ def binarizeColumnsMenu(df):
     columns_to_drop = []  # Track columns that will be dropped at the end
     replaced_columns = []  # Track columns that have been replaced (should not be auto-dropped)
     auto_remove_base_columns = True  # Flag to control auto removal at the end
+    auto_replaced_columns = set()  # Track columns modified by the 'a' command
     
     interactive_print("\n===== Column Binarization Menu =====")
     
@@ -548,7 +549,7 @@ def binarizeColumnsMenu(df):
         elif user_input == 'a':
             # Automatic replacement of values across all columns
             interactive_print("\n=== Automatic String Replacement ===")
-            interactive_print("This will replace specific values with 'X' or ''0'' across selected columns.")
+            interactive_print("This will replace specific values with '1' or ''0'' across selected columns.")
             
             # Get columns to process
             current_columns = list(df_result.columns)
@@ -577,11 +578,8 @@ def binarizeColumnsMenu(df):
             yes_list_input = scan_input("\nEnter values to replace with '1' (comma-separated):")
             yes_list = [item.strip() for item in yes_list_input.split(',') if item.strip()]
             
-            # Get values to replace with "0"
-            no_list_input = scan_input("\nEnter values to replace with '0' (comma-separated):")
-            no_list = [item.strip() for item in no_list_input.split(',') if item.strip()]
             
-            if not yes_list and not no_list:
+            if not yes_list:
                 interactive_print("No replacement values provided, operation cancelled.")
                 continue
             
@@ -590,13 +588,12 @@ def binarizeColumnsMenu(df):
             interactive_print("\nReady to perform the following replacements:")
             interactive_print(f"In columns: {', '.join(columns_to_process)}")
             interactive_print(f"Replace {yes_list} with '1'")
-            interactive_print(f"Replace {no_list} with '0'")
             
-            if not is_interactive:
-                confirm = input("\nConfirm operation? (y/n): ").strip().lower()
-                if confirm != 'y':
-                    interactive_print("Operation cancelled.")
-                    continue
+            # if is_interactive:
+            #     confirm = input("\nConfirm operation? (y/n): ").strip().lower()
+            #     if confirm != 'y':
+            #         interactive_print("Operation cancelled.")
+            #         continue
             
             # Perform replacements
             try:
@@ -607,35 +604,20 @@ def binarizeColumnsMenu(df):
                 affected_columns = []
                 
                 for col in columns_to_process:
-                    if df_result[col].dtype == 'object':  # Only process string columns
-                        # Create copies to avoid modifying the lists
-                        yes_values = list(yes_list)
-                        no_values = list(no_list)
-                        
-                        # Count values before replacement
-                        values_before = df_result[col].value_counts().sum()
-                        
-                        # Perform replacements
-                        for value in yes_values:
-                            df_result[col] = df_result[col].replace(value, "X")
-                        
-                        for value in no_values:
-                            df_result[col] = df_result[col].replace(value, "")
-                        
-                        # Count changes
-                        different_values = (df_before[col] != df_result[col]).sum()
-                        if different_values > 0:
-                            changes_made += different_values
-                            affected_columns.append(col)
+                    binarizeColumn(df_result, col, col, yes_list, 'string_equals')
                 
                 # Report results
                 if changes_made > 0:
                     interactive_print(f"\nReplacement complete! {changes_made} values replaced across {len(affected_columns)} columns.")
                     interactive_print(f"Affected columns: {', '.join(affected_columns)}")
                     
+                    # Add affected columns to the tracking set
+                    for col in affected_columns:
+                        auto_replaced_columns.add(col)
+                    
                     # Add to history with a special entry
                     binarized_columns_history.append(
-                        (affected_columns, "MULTIPLE_COLUMNS", [yes_list, no_list], "auto_replacement", 
+                        (affected_columns, "MULTIPLE_COLUMNS", [yes_list], "auto_replacement", 
                          {"columns": len(affected_columns), "values_replaced": changes_made})
                     )
                 else:
@@ -777,18 +759,22 @@ def binarizeColumnsMenu(df):
                 df_result = df_before  # Restore previous state on error
     
     # Process removals: remove all base columns used in binarization operations
-    # except those that were replaced with a column of the same name
+    # except those that were replaced with a column of the same name or modified by 'a' command
     if auto_remove_base_columns:
         base_columns_to_remove = set()
-        for src_col, new_col, _, _, _ in binarized_columns_history:
+        for src_col, new_col, _, threshold_type, _ in binarized_columns_history:
+            # Skip entries from auto replacement ('a' command)
+            if threshold_type == "auto_replacement":
+                continue
+                
             if isinstance(src_col, list):
                 for col in src_col:
-                    # Only add column if it wasn't replaced
-                    if col != new_col and col not in replaced_columns:
+                    # Only add column if it wasn't replaced and wasn't auto-replaced
+                    if col != new_col and col not in replaced_columns and col not in auto_replaced_columns:
                         base_columns_to_remove.add(col)
             else:
                 # Single column case
-                if src_col != new_col and src_col not in replaced_columns:
+                if src_col != new_col and src_col not in replaced_columns and src_col not in auto_replaced_columns:
                     base_columns_to_remove.add(src_col)
         
         # Add to the columns_to_drop list
@@ -942,18 +928,16 @@ if __name__ == "__main__":
                 
             elif user_choice == 'export':
                 # Export the processed file
-                df_modif.to_csv(args.output_file, index=False, sep=';', encoding='latin-1')
+                csv_path = args.output_file.rsplit('.', 1)[0] + '.csv'
+                df_modif.to_csv(csv_path, index=False, sep=';', encoding='latin-1')
                 interactive_print(f"File exported as CSV to: {args.output_file + '.csv'}")
             
                 # Generate an SLF file with the same base name
                 slf_path = args.output_file.rsplit('.', 1)[0] + '.slf'
-                # First save as temporary CSV then convert to SLF
-                temp_csv = args.output_file + '.temp'
-                df_modif.to_csv(temp_csv, index=False)
-                csv_to_slf(temp_csv, slf_path)
-                # Remove temporary file
-
-                os.remove(temp_csv)
+                
+                df_modif.to_csv(csv_path, index=False)
+                csv_to_slf(csv_path, slf_path)
+                
                 interactive_print(f"File exported as SLF to: {slf_path}")
                 
                 
