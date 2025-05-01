@@ -925,12 +925,12 @@ if __name__ == "__main__":
             elif user_choice == 'export':
                 # Export the processed file
                 csv_path = args.output_file.rsplit('.', 1)[0] + '.csv'
-                df_modif.to_csv(csv_path, index=False, sep=';', encoding='latin-1')
-                interactive_print(f"File exported as CSV to: {args.output_file + '.csv'}")
-            
-                # Generate an SLF file with the same base name
+                df_modif.to_csv(csv_path, index=False, sep=',', encoding='latin-1')
                 slf_path = args.output_file.rsplit('.', 1)[0] + '.slf'
                 csv_to_slf(csv_path, slf_path)
+
+                df_modif.to_csv(csv_path, index=False, sep=',', encoding='latin-1')
+                interactive_print(f"File exported as CSV to: {args.output_file + '.csv'}")
                 
                 interactive_print(f"File exported as SLF to: {slf_path}")
                 
