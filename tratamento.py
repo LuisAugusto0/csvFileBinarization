@@ -94,7 +94,7 @@ def binarizeColumn(df, column_names, new_column_name, threshold, threshold_type)
         new_column_name: Name of the column after binarization
         threshold: Threshold for binarization
         threshold_type: Type of threshold ('superior', 'inferior', 'superior_inferior', 
-                      'equals', 'not_equals', 'string_equals' or 'string_not_equals')
+                      'equals', 'not_equals', 'string_contains' or 'string_not_contains')
         
     Returns:
         pandas.DataFrame: Modified DataFrame
@@ -130,30 +130,21 @@ def binarizeColumn(df, column_names, new_column_name, threshold, threshold_type)
         elif threshold_type in ('inferior', 'equals'):
             # Use all (logical AND) - all columns must meet condition
             df['_temp_combined'] = df[valid_columns].max(axis=1)
-        # elif threshold_type == 'string_equals':
-        #     # Create concatenated string column for text search
-        #     df['_temp_combined'] = df[valid_columns].astype(str).agg('/'.join, axis=1)
-        #     print(f"Temporary column created for string search: {df['_temp_combined']}")
-        # elif threshold_type == 'string_not_Equals':
-        #     # Create concatenated string column for text search
-        #     df['_temp_combined'] = df[valid_columns].astype(str).agg('/'.join, axis=1)
         elif threshold_type == 'superior_inferior':
             # For range checks, use the mean of each row
             df['_temp_combined'] = df[valid_columns].mean(axis=1)
-        else:
-            print(f"Warning: Threshold type '{threshold_type}' not supported for multiple columns")
-            return df
-        
-        # Use the temporary column for the binarization
-        working_column = '_temp_combined'
-    elif threshold_type == 'string_equals' or threshold_type == 'string_not_equals':
-        # Create concatenated string column for text search
-        df['_temp_combined'] = df[valid_columns].astype(str).apply(lambda col: col.map(normalize_string)).agg(lambda x: '/' + '/'.join(x) + '/', axis=1)
-        working_column = '_temp_combined'
-        print(f"Temporary column created for string search: {df['_temp_combined'].value_counts()}")
     else:
         # Use the single valid column directly
         working_column = valid_columns[0]
+        
+    if threshold_type == 'string_contains' or threshold_type == 'string_not_contains':
+        # Create concatenated string column for text search
+        df['_temp_combined'] = df[valid_columns].astype(str).apply(lambda col: col.map(normalize_string)).agg(lambda x: '/' + '/'.join(x) + '/', axis=1)
+        # df['_temp_combined'] = df[valid_columns].astype(str).apply(lambda col: col.map(normalize_string)).agg(' '.join, axis=1)
+        working_column = '_temp_combined'
+        print(f"Temporary column created for string search: {df['_temp_combined'].value_counts()}")
+        print(f"{df['_temp_combined'].head()}")
+    
     
     # Perform the binarization based on threshold_type
     if threshold_type == 'superior':
@@ -172,22 +163,22 @@ def binarizeColumn(df, column_names, new_column_name, threshold, threshold_type)
             df[new_column_name] = np.where(df[working_column] != threshold, "1", "0")
         else:
             df[new_column_name] = np.where(not arrayTest(df[working_column], threshold), "1", "0")
-    elif threshold_type == 'string_equals':
+    elif threshold_type == 'string_contains':
         if not "," in threshold:
-            threshold = f"/{threshold}/"
+            # threshold = f"/{threshold}/"
             df[new_column_name] = np.where(df[working_column].str.contains(threshold, na=False), "1", "0")
         else:
             threshold = threshold.split(",")
-            threshold = [f"/{item.strip()}/" for item in threshold]
+            # threshold = [f"/{item.strip()}/" for item in threshold]
             # Apply the arrayStringTest function to get a boolean Series
             df[new_column_name] = np.where(arrayStringTest(threshold, df[working_column].str), "1", "0")
-    elif threshold_type == 'string_not_equals':
+    elif threshold_type == 'string_not_contains':
         if not "," in threshold:
-            threshold = f"/{threshold}/"
+            # threshold = f"/{threshold}/"
             df[new_column_name] = np.where(df[working_column].str.contains(threshold, na=False), "0", "1")
         else:
             threshold = threshold.split(",")
-            threshold = [f"/{item.strip()}/" for item in threshold]
+            # threshold = [f"/{item.strip()}/" for item in threshold]
             # Apply the arrayStringTestNot function to get a boolean Series
             df[new_column_name] = np.where(arrayStringTestNot(threshold, df[working_column].str), "1", "0")
     else:
@@ -386,7 +377,7 @@ def binarizeColumnsMenu(df):
     
     def display_columns(cols_list, binarized):
         """Helper function to display columns with their indices"""
-        interactive_print("\n=== Available Columns ===")
+        print("\n=== Available Columns ===")
         for i, col in enumerate(cols_list):
             status = ""
             if any(col == src_col for src_col, _, _, _, _ in binarized):
@@ -402,7 +393,7 @@ def binarizeColumnsMenu(df):
             if col in columns_to_drop:
                 status += " [MARKED FOR REMOVAL]"
                 
-            interactive_print(f"[{i}] {col}{status}")
+            print(f"[{i}] {col}{status}")
     
     def display_threshold_types():
         """Helper function to display available threshold types"""
@@ -412,8 +403,8 @@ def binarizeColumnsMenu(df):
         interactive_print("- 'superior_inferior': Mark when threshold[1] < value < threshold[0]")
         interactive_print("- 'equals': Mark when value == threshold")
         interactive_print("- 'not_equals': Mark when value == threshold")
-        interactive_print("- 'string_equals': Mark when string contains threshold")
-        interactive_print("- 'string_not_equals': Mark when string doesn't contain threshold")
+        interactive_print("- 'string_contains': Mark when string contains threshold")
+        interactive_print("- 'string_not_contains': Mark when string doesn't contain threshold")
     
     def display_menu():
         """Helper function to display menu options"""
@@ -604,7 +595,7 @@ def binarizeColumnsMenu(df):
                 affected_columns = []
                 
                 for col in columns_to_process:
-                    binarizeColumn(df_result, col, col, yes_list, 'string_equals')
+                    binarizeColumn(df_result, col, col+"_bin", yes_list, 'string_contains')
                 
                 # Report results
                 if changes_made > 0:
@@ -681,24 +672,24 @@ def binarizeColumnsMenu(df):
             
             # Ask if original columns should be dropped after binarization
             # Skip this question if the new column has the same name as a source column
-            skip_drop_question = is_overwriting and any(col == new_column_name for col in source_columns)
-            drop_originals = False
+            # skip_drop_question = is_overwriting and any(col == new_column_name for col in source_columns)
+            drop_originals = True
             
-            if not skip_drop_question and not auto_remove_base_columns:
-                drop_originals = scan_input("Drop original columns after binarization? (y/n): ")
-                drop_originals = drop_originals == 'y'
-            elif auto_remove_base_columns:
-                drop_originals = True
-                interactive_print("Original columns will be automatically removed (auto-removal enabled).")
-            else:
-                interactive_print("Note: Source column will be replaced with binarized version")
+            # if not skip_drop_question and not auto_remove_base_columns:
+            #     drop_originals = scan_input("Drop original columns after binarization? (y/n): ")
+            #     drop_originals = drop_originals == 'y'
+            # elif auto_remove_base_columns:
+            #     drop_originals = True
+            #     interactive_print("Original columns will be automatically removed (auto-removal enabled).")
+            # else:
+            #     interactive_print("Note: Source column will be replaced with binarized version")
             
             # Get threshold type
             display_threshold_types()
             threshold_type = scan_input("Enter threshold type: ")
             
             valid_types = ['superior', 'inferior', 'superior_inferior', 
-                           'equals', 'not_equals', 'string_equals', 'string_not_equals']
+                           'equals', 'not_equals', 'string_contains', 'string_not_contains']
             if threshold_type not in valid_types:
                 interactive_print(f"Invalid threshold type. Please choose from: {', '.join(valid_types)}")
                 continue
@@ -712,7 +703,7 @@ def binarizeColumnsMenu(df):
                 except ValueError:
                     interactive_print("Please enter valid numbers for thresholds")
                     continue
-            elif threshold_type in ['string_equals', 'string_not_equals']:
+            elif threshold_type in ['string_contains', 'string_not_contains']:
                 threshold = scan_input("Enter string to search for: ")
             else:
                 threshold_input = scan_input("Enter threshold value: ")
@@ -740,18 +731,14 @@ def binarizeColumnsMenu(df):
                     (source_columns, new_column_name, threshold, threshold_type, df_result[new_column_name].value_counts())
                 )
                 
-                # Mark columns for removal if requested
-                if drop_originals:
+                # Mark columns for removal if auto removal is enabled
+                if auto_remove_base_columns:
                     for col in source_columns:
                         # Don't mark the column for removal if it's the same as the new column name
                         if col != new_column_name and col not in columns_to_drop:
                             columns_to_drop.append(col)
                 
                 interactive_print(f"Binarization complete! Column '{new_column_name}' added.")
-                if drop_originals:
-                    cols_to_be_removed = [col for col in source_columns if col != new_column_name]
-                    if cols_to_be_removed:
-                        interactive_print(f"Original column(s) marked for removal at the end: {', '.join(cols_to_be_removed)}")
             except Exception as e:
                 # Error message always displayed
                 print(f"Error during binarization: {str(e)}")
@@ -763,10 +750,6 @@ def binarizeColumnsMenu(df):
     if auto_remove_base_columns:
         base_columns_to_remove = set()
         for src_col, new_col, _, threshold_type, _ in binarized_columns_history:
-            # Skip entries from auto replacement ('a' command)
-            if threshold_type == "auto_replacement":
-                continue
-                
             if isinstance(src_col, list):
                 for col in src_col:
                     # Only add column if it wasn't replaced and wasn't auto-replaced
