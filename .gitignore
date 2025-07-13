@@ -1,4 +1,6 @@
+*.pyc
 *.csv
 *.CSV
 *.txt
 output*
+teste*

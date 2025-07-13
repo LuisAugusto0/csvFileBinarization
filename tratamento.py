@@ -8,234 +8,8 @@ import re
 import os
 import traceback
 
-def interactive_print(*print_args, **print_kwargs):
-    if is_interactive:
-        print(*print_args, **print_kwargs)
-
-def normalize_string(name):
-    """Normalize a column name by removing whitespace and replacing special characters (excluding hyphen and comma) with underscores"""
-    name = str(name).strip().lower()  # Convert to string, strip whitespace, and lowercase
-    name = re.sub(r'[^\w\s/,-]', '_', name)  # Replace non-word/non-space/non-hyphen/non-comma chars with _
-    name = re.sub(r'\s+', '_', name)      # Replace spaces with _
-    name = re.sub(r'_+', '_', name)        # Collapse multiple _ into one
-    name = name.strip('_')  # Remove any _ at the start or end of the string
-
-    return name
-
-def scan_input(prompt):
-    """Scan input from the user with a prompt"""
-    if is_interactive:
-        return normalize_string(input(prompt))
-    else:
-        # In non-interactive mode, read from standard input
-        return normalize_string(input())
-
-def arrayTest(array, value):
-    """
-    Tests if a value is in the array
-    
-    Args:
-        array: Array to be tested
-        value: Value (number) to be tested
-        
-    Returns:
-        bool: True if the value is in the array, False otherwise
-    """
-    for i in range(len(array)):
-        if array[i] == value:
-            return True
-    return False
-
-def arrayStringContainsTest(array, string_methods):
-    """
-    Tests if any of the values in the array is contained in the given string series
-    
-    Args:
-        array: Array of strings to check for
-        string_methods: The string accessor (Series.str) to check against
-        
-    Returns:
-        Series: Boolean Series with True where any value in array is found
-    """
-    # Create a mask that starts with all False
-    result = pd.Series(False, index=string_methods._parent.index)
-    # For each threshold, update the mask where the strings contain that threshold
-    for threshold in array:
-        threshold = f".{threshold}."
-        result = result | string_methods.contains(threshold, na=False)
-    
-    return result
-
-def arrayStringEqualsTest(array, string_methods, valid_columns):
-    """
-    Tests if any of the values in the array is contained in the given string series
-    
-    Args:
-        array: Array of strings to check for
-        string_methods: The string accessor (Series.str) to check against
-        
-    Returns:
-        Series: Boolean Series with True where any value in array is found
-    """
-
-    # For each threshold, update the mask where the strings contain that threshold
-    print(f"Array: {array}")
-    print(f"Valid columns: {valid_columns}")
-    number_of_columns = len(valid_columns)
-    print(f"Number of columns: {number_of_columns}")
-    i = 0
-    for threshold in array:
-        thresholdFinal = ""
-        for _ in range(number_of_columns):
-            thresholdFinal += threshold + "."
-        thresholdFinal = thresholdFinal[:-1]  # Remove the last dot
-        array[i] = thresholdFinal
-        print(f"threshold final{i}: {array[i]}")
-        i += 1
-    
-    return arrayStringContainsTest(array, string_methods)
-
-def arrayStringTestNot(array, string_methods):
-    """
-    Tests if none of the values in the array are contained in the given string
-    
-    Args:
-        array: Array of strings to check for
-        string_methods: The string accessor (Series.str) to check against
-        
-    Returns:
-        Series: Boolean Series with True where no value in array is found
-    """
-    # Create a mask that starts with all True
-    result = pd.Series(True, index=string_methods._parent.index)
-    
-    # For each threshold, update the mask to exclude strings containing the threshold
-    for threshold in array:
-        result = result & ~string_methods.contains(threshold, na=False)
-    
-    return result
-    
-def binarizeColumn(df, column_names, new_column_name, threshold, threshold_type):
-    """
-    Binarizes one or multiple columns in the DataFrame based on a threshold.
-    
-    Args:
-        df: DataFrame to be modified
-        column_names: Name(s) of column(s) to be binarized (string or list of strings)
-        new_column_name: Name of the column after binarization
-        threshold: Threshold for binarization
-        threshold_type: Type of threshold ('superior', 'inferior', 'superior inferior', 
-                      'equals', 'not equals', 'string contains', 'string not contains',
-                        'string equals' or 'string not equals')
-        
-    Returns:
-        pandas.DataFrame: Modified DataFrame
-    """
-    # Convert single column name to list for consistent handling
-    if isinstance(column_names, str):
-        column_names = [column_names]
-    
-    # Verify that at least one column exists in the DataFrame
-    valid_columns = [col for col in column_names if col in df.columns]
-
-    # Print warning for the columns that do not exist
-    if len(valid_columns) != len(column_names):
-        missing_columns = set(column_names) - set(valid_columns)
-        # Warnings should always be displayed, not just in interactive mode
-        print("=== Warning ===")
-        print(f"The following columns do not exist in the DataFrame:\n{'\n'.join(missing_columns)}")
-        print("Proceeding with the existing columns.")
-        print("=== End of Warning ===\n")
-    
-    if not valid_columns:
-        print(f"Warning: None of the specified columns {column_names} exist in the DataFrame")
-        return df
-    
-    interactive_print(f"Performing binarization on columns: {', '.join(valid_columns)}")
-
-    # Create a temporary working column if multiple columns are provided
-    if threshold_type == 'string_contains' or threshold_type == 'string_not_contains' or threshold_type == 'string_equals' or threshold_type == 'string_not_equals':
-        # Create concatenated string column for text search
-        df['_temp_combined'] = df[valid_columns].astype(str).apply(lambda col: col.map(normalize_string)).agg(lambda x: '.' + '.'.join(x) + '.', axis=1)
-        # Replace NaN values with 'n/a' in the temporary column
-        df['_temp_combined'] = df['_temp_combined'].fillna('n/a')
-        working_column = '_temp_combined'
-        print(f"Temporary column created for string search: {df['_temp_combined'].value_counts()}")
-        print(f"{df['_temp_combined'].head()}")
-    elif len(valid_columns) > 1:
-        # Choose appropriate combination based on threshold_type
-        if threshold_type in ('superior', 'not_Equals'):
-            # Use any (logical OR) - if any column meets condition
-            df['_temp_combined'] = df[valid_columns].min(axis=1)
-        elif threshold_type in ('inferior', 'equals'):
-            # Use all (logical AND) - all columns must meet condition
-            df['_temp_combined'] = df[valid_columns].max(axis=1)
-        elif threshold_type == 'superior_inferior':
-            # For range checks, use the mean of each row
-            df['_temp_combined'] = df[valid_columns].mean(axis=1)
-    else:
-        # Use the single valid column directly
-        working_column = valid_columns[0]
-        
-    
-    
-    
-    # Perform the binarization based on threshold_type
-    if threshold_type == 'superior':
-        df[new_column_name] = np.where(df[working_column] < threshold, "1", "0")
-    elif threshold_type == 'inferior':
-        df[new_column_name] = np.where(df[working_column] > threshold, "1", "0")
-    elif threshold_type == 'superior_inferior':
-        df[new_column_name] = np.where((df[working_column] < threshold[0]) & (df[working_column] > threshold[1]), "1", "0")
-    elif threshold_type == 'equals':
-        if isinstance(threshold, (int, float)):
-            df[new_column_name] = np.where(df[working_column] == threshold, "1", "0")
-        else:
-            df[new_column_name] = np.where(arrayTest(df[working_column], threshold), "1", "0")
-    elif threshold_type == 'not_equals':
-        if isinstance(threshold, (int, float)):
-            df[new_column_name] = np.where(df[working_column] != threshold, "1", "0")
-        else:
-            df[new_column_name] = np.where(not arrayTest(df[working_column], threshold), "1", "0")
-    elif threshold_type == 'string_contains':
-        if not "," in threshold:
-            df[new_column_name] = np.where(arrayStringContainsTest([threshold], df[working_column].str), "1", "0")
-        else:
-            threshold = threshold.split(",")
-            # Apply the arrayStringTest function to get a boolean Series
-            df[new_column_name] = np.where(arrayStringContainsTest(threshold, df[working_column].str), "1", "0")
-    elif threshold_type == 'string_not_contains':
-        if not "," in threshold:
-            df[new_column_name] = np.where(arrayStringContainsTest([threshold], df[working_column].str), "0", "1")
-        else:
-            threshold = threshold.split(",")
-            # Apply the arrayStringTestNot function to get a boolean Series
-            df[new_column_name] = np.where(arrayStringContainsTest(threshold, df[working_column].str), "0", "1")
-    elif threshold_type == 'string_equals':
-        if not "," in threshold:
-            df[new_column_name] = np.where(arrayStringEqualsTest([threshold], df[working_column].str, valid_columns), "1", "0")
-        else:
-            threshold = threshold.split(",")
-            # Apply the arrayStringTest function to get a boolean Series
-            df[new_column_name] = np.where(arrayStringEqualsTest(threshold, df[working_column].str, valid_columns), "1", "0")
-    elif threshold_type == 'string_not_equals':
-        if not "," in threshold:
-            df[new_column_name] = np.where(arrayStringEqualsTest([threshold], df[working_column].str, valid_columns), "0", "1")
-        else:
-            threshold = threshold.split(",")
-            # Apply the arrayStringTestNot function to get a boolean Series
-            df[new_column_name] = np.where(arrayStringEqualsTest(threshold, df[working_column].str, valid_columns), "0", "1")
-    else:
-        print(f"Invalid threshold type: {threshold}. Use 'superior', 'inferior', etc.")
-        return df
-    
-    # Clean up temporary column if it was created
-    if len(valid_columns) > 1 and '_temp_combined' in df.columns:
-        df = df.drop('_temp_combined', axis=1)
-    
-    print(f"{df[new_column_name].value_counts()}\n")
-    
-    return df
+# Import all utility functions from the created py_utilis library
+from py_utils import *
 
 def readColumnsToDrop(df):
     """
@@ -255,6 +29,9 @@ def readColumnsToDrop(df):
     interactive_print("\n===== Columns to drop menu =====")
     
     def display_columns(cols_list, to_drop):
+        if not is_interactive:
+            return
+    
         """Helper function to display columns with their indices"""
         interactive_print("\n=== Available Columns ===")
         for i, col in enumerate(cols_list):
@@ -263,19 +40,8 @@ def readColumnsToDrop(df):
                 status = " [MARKED FOR REMOVAL]"
             interactive_print(f"[{i}] {col}{status}")
     
-    def display_menu():
-        """Helper function to display menu options"""
-        interactive_print("\n=== Column Removal Options ===")
-        interactive_print("- Enter a single index or column name (e.g. '5') to mark a column for removal")
-        interactive_print("- Enter a index or column name range (e.g. '5-10') to mark multiple columns for removal")
-        interactive_print("- Enter 'u' to access the undo menu")
-        interactive_print("- Enter 'l' to list all columns again")
-        interactive_print("- Enter 'r' to display  only columns marked for removal")
-        interactive_print("- Enter 'h' to this menu again")
-        interactive_print("- Enter 'done' to finish selection")
-    
     display_columns(df_columns, columns_to_drop)
-    display_menu()
+    display_column_removal_menu()
     
     while True:
         user_input = scan_input("\nEnter command: ")
@@ -350,7 +116,7 @@ def readColumnsToDrop(df):
                     interactive_print(f"{i}. {col} - {reason}")
                 undo_input = scan_input("Enter index or range to restore (e.g., '2' or '2-4', or 'back' to return): ")
         elif user_input == 'h':
-            display_menu()
+            display_column_removal_menu()
         else:
             try:
                 # Parse range input
@@ -421,6 +187,8 @@ def binarizeColumnsMenu(df):
     
     def display_columns(cols_list, binarized):
         """Helper function to display columns with their indices"""
+        if not is_interactive:
+            return
         print("\n=== Available Columns ===")
         for i, col in enumerate(cols_list):
             status = ""
@@ -514,28 +282,27 @@ def binarizeColumnsMenu(df):
             # Toggle auto-removal of base columns
             auto_remove_base_columns = not auto_remove_base_columns
             status = "ENABLED" if auto_remove_base_columns else "DISABLED"
-            interactive_print(f"Auto-removal of base columns is now {status}")
+            print(f"Auto-removal of base columns is now {status}")
             continue
         elif user_input == 's':
             if binarized_columns_history:
-                interactive_print("\n=== Binarized Columns Summary ===")
+                print("\n=== Binarized Columns Summary ===")
                 for i, (src_col, new_col, threshold, threshold_type, _) in enumerate(binarized_columns_history):
                     src_display = src_col
                     if isinstance(src_col, list):
                         src_display = ", ".join(src_col)
                     
                     removed_status = " [REMOVED]" if new_col not in df_result.columns else ""
-                    interactive_print(f"{i+1}. Source: {src_display} → New: {new_col}{removed_status}")
-                    interactive_print(f"   Threshold: {threshold} (Type: {threshold_type})")
+                    print(f"{i+1}. {src_display} -> {new_col}{removed_status} (Type: {threshold_type}, Threshold: {threshold})")
                     if new_col in df_result.columns:
-                        interactive_print(f"   Distribution: {df_result[new_col].value_counts().to_dict()}")
+                        print(f"   Distribution: {df_result[new_col].value_counts().to_dict()}")
             else:
-                interactive_print("No columns have been binarized yet.")
+                print("No columns have been binarized yet.")
             continue
         elif user_input == 'r':
             # Option to remove a binarized column
             if not binarized_columns_history:
-                interactive_print("No binarized columns to remove.")
+                print("No binarized columns to remove.")
                 continue
                 
             interactive_print("\n=== Remove Binarized Column ===")
@@ -735,7 +502,7 @@ def binarizeColumnsMenu(df):
                 interactive_print(f"Using threshold: {threshold} (Type: {threshold_type})")
                 
                 df_before = df_result.copy()
-                df_result = binarizeColumn(
+                df_result = binarize_column(
                     df_result, source_columns, new_column_name, threshold, threshold_type
                 )
                 
@@ -806,7 +573,7 @@ def binarizeColumnsMenu(df):
             if new_col not in df_result.columns:
                 col_status = " [REMOVED]"
                 
-            print(f"{i+1}. {src_display} → {new_col}{col_status} (Type: {threshold_type}, Threshold: {threshold})")
+            print(f"{i+1}. {src_display} -> {new_col}{col_status} (Type: {threshold_type}, Threshold: {threshold})")
     
     # Display final column removal summary
     if columns_to_drop:
@@ -819,37 +586,88 @@ def binarizeColumnsMenu(df):
     
     return df_result
 
-def csv_to_slf(csv_path, slf_path):
-    with open(csv_path, newline='') as f:
-        reader = csv.reader(f)
-        headers = next(reader)
-        # assume first header is blank or 'Object'
-        object_names = []
-        matrix = []
-        for row in reader:
-            if not row: continue
-            object_names.append(str(len(object_names)))
-            # interpret presence: any non-zero/non-empty → '1', else '0'
-            line = []
-            for val in row:
-                v = val.strip()
-                line.append('1' if v and v not in ('0','false','False') else '0')
-            matrix.append(line)
+def removeRowsByValue(df):
+    """
+    Interactive function to remove rows based on specific value(s) in a selected column.
+    Args:
+        df (pandas.DataFrame): The DataFrame to modify.
+    Returns:
+        pandas.DataFrame: The modified DataFrame with rows removed.
+    """
+    interactive_print("\n===== Remove Rows by Value =====")
 
-    attribute_names = headers
-    n_objs = len(object_names)
-    n_attrs = len(attribute_names)
+    # Display available columns
+    interactive_print("\nAvailable columns:")
+    for i, col in enumerate(df.columns):
+        interactive_print(f"[{i}] {col}")
 
-    with open(slf_path, 'w', newline='') as f:
-        f.write('[Lattice]\n')
-        f.write(f'{n_objs}\n{n_attrs}\n')
-        f.write('[Objects]\n')
-        f.writelines(obj + '\n' for obj in object_names)
-        f.write('[Attributes]\n')
-        f.writelines(attr + '\n' for attr in attribute_names)
-        f.write('[relation]\n')
-        for row in matrix:
-            f.write(' '.join(row) + ' ' + '\n')
+    # Get the column name from the user
+    column_name = scan_input("Enter the column name or index to filter rows: ")
+    try:
+        # Allow selection by index or name
+        if column_name.isdigit():
+            column_index = int(column_name)
+            if 0 <= column_index < len(df.columns):
+                column_name = df.columns[column_index]
+            else:
+                interactive_print("Invalid column index.")
+                return df
+        elif column_name not in df.columns:
+            interactive_print(f"Column '{column_name}' does not exist in the DataFrame.")
+            return df
+    except ValueError:
+        interactive_print("Invalid input. Please enter a valid column name or index.")
+        return df
+
+    interactive_print("\nColumn ${column_name} unique values:\n")
+    if(is_interactive):
+        list_column_unique_values(df, column_name)
+    interactive_print("\n")
+
+
+
+    # Choose removal type
+    interactive_print("\nRemoval types available:")
+    interactive_print("1. equals (remove rows where value matches)")
+    interactive_print("2. not_equals (remove rows where value does NOT match)")
+    interactive_print("3. between_interval (remove rows where value is BETWEEN two numbers)")
+    interactive_print("4. outside_interval (remove rows where value is OUTSIDE two numbers)")
+    removal_type_input = scan_input("Choose removal type (1/2/3/4): ").strip()
+    removal_types = {
+        "1": "equals",
+        "2": "not_equals",
+        "3": "between_interval",
+        "4": "outside_interval"
+    }
+    threshold_type = removal_types.get(removal_type_input)
+    if not threshold_type:
+        interactive_print("Invalid removal type selected.")
+        return df
+
+    # Get the value(s) to filter rows
+    if threshold_type in ["equals", "not_equals"]:
+        value_to_remove = scan_input(
+            f"Enter the value(s) to remove rows where '{column_name}' {'matches' if threshold_type == 'equals' else 'does NOT match'} (comma-separated for multiple values): "
+        )
+        values_list = [normalize_string(v.strip()) for v in value_to_remove.split(",") if v.strip()]
+        threshold = values_list if len(values_list) > 1 else values_list[0]
+    elif threshold_type in ["between_interval", "outside_interval"]:
+        min_val = scan_input("Enter minimum value of interval: ")
+        max_val = scan_input("Enter maximum value of interval: ")
+        try:
+            min_val = float(min_val)
+            max_val = float(max_val)
+            threshold = [min_val, max_val]
+        except ValueError:
+            interactive_print("Invalid interval values. Please enter numeric values.")
+            return df
+
+    rows_before = len(df)
+    df = remove_rows_by_match(df, column_name, threshold, threshold_type, is_interactive=True)
+    rows_after = len(df)
+
+    print(f"Removed {rows_before - rows_after} rows using '{threshold_type}' on '{column_name}' with threshold {threshold}.")
+    return df
 
 if __name__ == "__main__":
     import os
@@ -857,7 +675,7 @@ if __name__ == "__main__":
     
     parser = argparse.ArgumentParser(description='Process a CSV file and save the transformed data.')
     parser.add_argument('input_file', type=str, help='Path to the input CSV file')
-    parser.add_argument('--output_file', type=str, default='output', help='Path to the input CSV file')
+    parser.add_argument('output_file', type=str, help='Path to the input CSV file')
     parser.add_argument('--format', type=str, choices=['csv', 'slf'], default='csv',
                         help='Output format in non-interactive mode (csv or slf)')
     parser.add_argument('--non-interactive', action='store_true', 
@@ -893,16 +711,6 @@ if __name__ == "__main__":
         interactive_print(f"Number of columns: {len(df_modif.columns)}")
         
         # Create main menu (only displayed in interactive mode)
-        def display_main_menu():
-            interactive_print("\n===== Main Menu =====")
-            interactive_print("- Enter 'drop' to select columns to drop")
-            interactive_print("- Enter 'bin' to binarize columns")
-            interactive_print("- Enter 'info' to display current dataframe info")
-            interactive_print("- Enter 'h' to show this menu again")
-            interactive_print("- Enter 'export' to save the processed file")
-            interactive_print("- Enter 'exit' to exit the program without saving")
-        
-        # Interactive mode
         display_main_menu()
 
         while True:
@@ -922,18 +730,19 @@ if __name__ == "__main__":
                 df_modif = binarizeColumnsMenu(df_modif)
                 interactive_print(f"Binarization complete. Current shape: {df_modif.shape}")
                 
+            elif user_choice == 'remove':
+                # Row removal functionality
+                df_modif = removeRowsByValue(df_modif)
+                
             elif user_choice == 'export':
                 # Export the processed file
-                csv_path = args.output_file.rsplit('.', 1)[0] + '.csv'
-                df_modif.to_csv(csv_path, index=False, sep=',', encoding='latin-1')
-                slf_path = args.output_file.rsplit('.', 1)[0] + '.slf'
-                csv_to_slf(csv_path, slf_path)
-
-                df_modif.to_csv(csv_path, index=False, sep=',', encoding='latin-1')
-                interactive_print(f"File exported as CSV to: {args.output_file + '.csv'}")
-                
+                prefix = args.output_file.rsplit('.', 1)[0] if '.' in args.output_file else args.output_file
+                csv_path = prefix + '.csv'
+                df_modif.to_csv(csv_path, index=False, sep=';', encoding='latin-1')
+                slf_path = prefix + '.slf'
+                SlfConversion.csv_to_slf(csv_path, slf_path)
+                interactive_print(f"File exported as CSV to: {csv_path}")
                 interactive_print(f"File exported as SLF to: {slf_path}")
-                
                 
                 continue_edit = scan_input("Would you like to continue editing? (y/n): ")
                 if continue_edit != 'y':
