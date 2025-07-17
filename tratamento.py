@@ -225,6 +225,7 @@ def binarizeColumnsMenu(df):
         interactive_print("\n=== Column Binarization Options ===")
         interactive_print("- Enter a single index or column name (e.g. '5') to binarize a column")
         interactive_print("- Enter a comma-separated list (e.g. '1,3,name1,5') to binarize multiple columns")
+        interactive_print("- Enter 'n' to normalize all values in dataframe to an easier manipulation")
         interactive_print("- Enter 'a' to automatically replace values with '1'/''0'' across columns")
         interactive_print("- Enter 'r' to remove a binarized column")
         interactive_print("- Enter 'l' to list all columns")
@@ -291,11 +292,12 @@ def binarizeColumnsMenu(df):
                     src_display = src_col
                     if isinstance(src_col, list):
                         src_display = ", ".join(src_col)
-                    
+                    if(len(src_display) > 25):
+                        src_display = src_display[:25] + "[...]"
                     removed_status = " [REMOVED]" if new_col not in df_result.columns else ""
                     print(f"{i+1}. {src_display} -> {new_col}{removed_status} (Type: {threshold_type}, Threshold: {threshold})")
                     if new_col in df_result.columns:
-                        print(f"   Distribution: {df_result[new_col].value_counts().to_dict()}")
+                        print(f"   Distribution: {df_result[new_col].value_counts().to_dict()}\n")
             else:
                 print("No columns have been binarized yet.")
             continue
@@ -398,6 +400,12 @@ def binarizeColumnsMenu(df):
                 print(f"Error during automatic replacement: {str(e)}")
                 df_result = df_before  # Restore previous state on error
             
+            continue
+        elif user_input == "n":
+            # Normalize the entire DataFrame
+            interactive_print("\nNormalizing all values in the DataFrame (removing leading/trailing spaces and lowercasing)...")
+            df_result = df_result.astype(str).apply(lambda col: col.map(normalize_string))
+            interactive_print("Normalization complete!")
             continue
         else:
             # Check if it's a direct column selection (single index, name, or comma-separated list)
@@ -733,7 +741,14 @@ if __name__ == "__main__":
             elif user_choice == 'remove':
                 # Row removal functionality
                 df_modif = removeRowsByValue(df_modif)
-                
+            
+            elif user_choice == 'remove_null':
+                # Remove all null rows from database
+                rows_before = len(df_modif)
+                df_modif = df_modif.dropna()
+                rows_after = len(df_modif)
+                print(f"Removed {rows_before - rows_after} rows that have null values.")
+
             elif user_choice == 'export':
                 # Export the processed file
                 prefix = args.output_file.rsplit('.', 1)[0] if '.' in args.output_file else args.output_file

@@ -165,9 +165,6 @@ def remove_rows_by_match(df, column_names, threshold, threshold_type, is_interac
             mask = col_series.isin(normalized_values)
         else:
             try:
-                if str(threshold).isdigit():
-                    threshold = int(threshold)
-                else:
                     threshold = normalize_string(str(threshold))
             except ValueError:
                 threshold = normalize_string(str(threshold))
@@ -180,9 +177,6 @@ def remove_rows_by_match(df, column_names, threshold, threshold_type, is_interac
             mask = col_series.isin(normalized_values)
         else:
             try:
-                if str(threshold).isdigit():
-                    threshold = int(threshold)
-                else:
                     threshold = normalize_string(str(threshold))
             except ValueError:
                 threshold = normalize_string(str(threshold))
@@ -195,6 +189,24 @@ def remove_rows_by_match(df, column_names, threshold, threshold_type, is_interac
     if is_interactive:
         print(f"Rows removed for {threshold_type} with threshold {threshold} on columns {working_column}.")
     return df
+
+def clone_column(df, original_column, new_column):
+    """
+    Clones a column in the DataFrame to a new column name.
+    Args:
+        df (pandas.DataFrame): The DataFrame to modify.
+        original_column (str): The name of the column to clone.
+        new_column (str): The name of the new column.
+    Returns:
+        pandas.DataFrame: Modified DataFrame with the cloned column.
+    """
+    if original_column not in df.columns:
+        print(f"Column '{original_column}' does not exist in the DataFrame.")
+        return df
+    df[new_column] = df[original_column].copy()
+    interactive_print(f"Column '{original_column}' cloned to '{new_column}'.")
+    return df
+    
 
 def list_column_unique_values(df, column):
     """

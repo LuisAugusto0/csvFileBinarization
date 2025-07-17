@@ -47,7 +47,7 @@ def arrayStringContainsTest(array, string_methods):
     result = pd.Series(False, index=string_methods._parent.index)
     # For each threshold, update the mask where the strings contain that threshold
     for threshold in array:
-        threshold = f".{threshold}."
+        threshold = f".{normalize_string(threshold)}."
         result = result | string_methods.contains(threshold, na=False)
     
     return result

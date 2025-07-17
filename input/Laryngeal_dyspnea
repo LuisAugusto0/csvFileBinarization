@@ -43,9 +43,10 @@ inferior
 n
 
 Main diagnostic
-Bronchiolitis
+Laryngeal dyspnea
 string_contains
-bronchiolitis
+Laryngeal dyspnea
+
 
 Blood culture results,Nasopharyngeal aspirate culture (NPA) Identification 1,Nasopharyngeal aspirate culture (NPA) Identification 2,Detection of DNA/RNA (TrueScience Respifinder Pathogen Identification Panel) Allele  1,Detection of DNA/RNA (TrueScience Respifinder Pathogen Identification Panel)  Allele  2,Detection of DNA/RNA (TrueScience Respifinder Pathogen Identification Panel)  Allele  3,Detection of DNA/RNA (TrueScience Respifinder Pathogen Identification Panel)  Allele  4,Detection of DNA/RNA (TrueScience Respifinder Pathogen Identification Panel)  Allele  5
 bacteria: Staphylococcus aureus
@@ -86,6 +87,7 @@ Coronaviruses
 s
 done
 
+done
 bin
 a
 Yes
@@ -93,7 +95,7 @@ No
 done
 
 remove
-Bronchiolitis
+Laryngeal dyspnea
 1
 0
 
